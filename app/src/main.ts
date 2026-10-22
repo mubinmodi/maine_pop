@@ -4,7 +4,7 @@ import { MapboxOverlay } from "@deck.gl/mapbox";
 import { exportUrl, getDetail, getGeometry, getLayer, getSchema, type LayerValues, type Schema } from "./api";
 import { mountControls, type State } from "./controls";
 import { levelForZoom, levelLabel, zoomForLevel } from "./levels";
-import { fmt, renderLegend, renderLevel } from "./mapLayer";
+import { divergingBreaks, fmt, renderLegend, renderLevel } from "./mapLayer";
 import { showDetail } from "./panel";
 
 const BASEMAP = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
@@ -14,7 +14,7 @@ async function start() {
   document.getElementById("disclosure-text")!.textContent = schema.disclosure;
 
   const state: State = {
-    variable: "population", category: "total", measure: "estimate", height: "population",
+    variable: "population", category: "total", measure: "estimate", scheme: "green_blue", height: "population",
     filters: [], confidence: "flag", extruded: true,
   };
   let selected: string | null = null;
@@ -25,6 +25,8 @@ async function start() {
     maxBounds: [[-70.6, 43.5], [-69.9, 43.85]], attributionControl: { compact: true },
   });
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+  // Keep the canvas filling its box if the map was created while hidden or narrow.
+  new ResizeObserver(() => map.resize()).observe(document.getElementById("map-wrap")!);
   const overlay = new MapboxOverlay({
     interleaved: false, layers: [],
     getTooltip: ({ object }) => {
@@ -54,16 +56,23 @@ async function start() {
     status.textContent = `Loading ${levelLabel(schema.levels, level).toLowerCase()}s…`;
     const heightVar = state.height === "color" ? state.variable : state.height;
     const heightCat = state.height === "color" ? state.category : "total";
-    const [geometry, color, extrude] = await Promise.all([
+    const vsCity = state.scheme === "vs_city" && state.measure === "share";
+    const [geometry, color, extrude, city] = await Promise.all([
       getGeometry(level),
       getLayer(level, state.variable, state.category, state.measure, state.filters),
       state.height === "none" ? Promise.resolve(null) : getLayer(level, heightVar, heightCat, "estimate", []),
+      vsCity ? getLayer("city", state.variable, state.category, "share", []) : Promise.resolve(null),
     ]);
     if (my !== seq) return;                       // a newer refresh started meanwhile
     current = { level, color };
+    const scheme = vsCity ? "vs_city" : state.scheme === "vs_city" ? "green_blue" : state.scheme;
+    const reference = city ? Object.values(city.values)[0]?.[0] ?? 0 : null;
+    const breaks = reference !== null
+      ? divergingBreaks(Object.values(color.values).filter((v) => v[0] > 0).map((v) => v[0] - reference))
+      : color.breaks;
     overlay.setProps({
       layers: [renderLevel(level, geometry, color, extrude, {
-        extruded: state.extruded, confidence: state.confidence, selected,
+        extruded: state.extruded, confidence: state.confidence, selected, scheme, reference, breaks,
         onClick: (id) => openDetail(level, id),
       })],
     });
@@ -72,7 +81,7 @@ async function start() {
       (state.measure === "share" ? " (share)" : " (count)");
     const heightLabel = state.height === "none" || !state.extruded ? null
       : state.height === "color" ? "selected category" : { population: "people", households: "households", housing_units: "housing units" }[state.height];
-    renderLegend(legend, title, color, state.confidence, heightLabel);
+    renderLegend(legend, title, color, state.confidence, heightLabel, scheme, breaks, reference);
     const n = Object.keys(color.values).length;
     status.textContent = `${levelLabel(schema.levels, level)} level · ${n.toLocaleString()} areas` +
       (color.filtered_count !== null ? ` · ${color.filtered_count.toLocaleString()} match filters` : "") +

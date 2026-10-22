@@ -4,6 +4,9 @@ A parcel-level synthetic population for Portland, Maine, built only from public 
 
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Module design: [docs/design.md](docs/design.md)
+- Validation report: [docs/validation.md](docs/validation.md)
+- Scaling plan: [docs/scaling.md](docs/scaling.md)
+- Risks and open questions: [docs/risks.md](docs/risks.md)
 - Terms: [GLOSSARY.md](GLOSSARY.md)
 
 ## Setup

@@ -1,10 +1,11 @@
 import { search, type Filter, type Schema, type SearchHit } from "./api";
-import type { ConfidenceMode } from "./mapLayer";
+import { SCHEMES, type ConfidenceMode, type Scheme } from "./mapLayer";
 
 export type State = {
   variable: string;
   category: string;
   measure: "estimate" | "share";
+  scheme: Scheme;
   height: "none" | "population" | "households" | "housing_units" | "color";
   filters: Filter[];
   confidence: ConfidenceMode;
@@ -43,6 +44,12 @@ export function mountControls(el: HTMLElement, schema: Schema, state: State, h: 
         <label><input type="radio" name="measure" value="estimate" ${state.measure === "estimate" ? "checked" : ""}> Count</label>
         <label><input type="radio" name="measure" value="share" ${state.measure === "share" ? "checked" : ""}> Share</label>
       </div>
+      <label for="scheme-group">Colours</label>
+      <div class="seg schemes" id="scheme-group" role="radiogroup" aria-label="Colour scheme">
+        ${(Object.keys(SCHEMES) as Scheme[]).map((k) => `<label title="${SCHEMES[k].label}"><input type="radio" name="scheme" value="${k}" ${state.scheme === k ? "checked" : ""}>
+          <span class="swatches">${SCHEMES[k].colors.map((c) => `<i style="background:rgb(${c.join(",")})"></i>`).join("")}</span>${SCHEMES[k].label}</label>`).join("")}
+      </div>
+      <p class="hint" id="scheme-hint"></p>
     </section>
     <section>
       <h2>3D</h2>
@@ -87,6 +94,14 @@ export function mountControls(el: HTMLElement, schema: Schema, state: State, h: 
       r.checked = r.value === (isTotal ? "estimate" : state.measure);
     });
     if (isTotal) state.measure = "estimate";
+    // "vs Portland" compares shares, so it needs the share measure.
+    const vs = el.querySelector<HTMLInputElement>('input[name="scheme"][value="vs_city"]')!;
+    vs.disabled = state.measure !== "share";
+    if (vs.disabled && state.scheme === "vs_city") state.scheme = "green_blue";
+    el.querySelectorAll<HTMLInputElement>('input[name="scheme"]').forEach((r) => (r.checked = r.value === state.scheme));
+    el.querySelector("#scheme-hint")!.textContent = vs.disabled
+      ? "Switch to Share to compare each area with Portland as a whole."
+      : state.scheme === "vs_city" ? "Blue is below Portland's share, red above, grey about the same." : "";
   };
   syncMeasure();
 
@@ -100,7 +115,9 @@ export function mountControls(el: HTMLElement, schema: Schema, state: State, h: 
   };
   $<HTMLSelectElement>("cat").onchange = (e) => { state.category = (e.target as HTMLSelectElement).value; h.onChange(); };
   el.querySelectorAll<HTMLInputElement>('input[name="measure"]').forEach((r) =>
-    r.addEventListener("change", () => { state.measure = r.value as State["measure"]; h.onChange(); }));
+    r.addEventListener("change", () => { state.measure = r.value as State["measure"]; syncMeasure(); h.onChange(); }));
+  el.querySelectorAll<HTMLInputElement>('input[name="scheme"]').forEach((r) =>
+    r.addEventListener("change", () => { state.scheme = r.value as Scheme; syncMeasure(); h.onChange(); }));
   $<HTMLInputElement>("extruded").onchange = (e) => { state.extruded = (e.target as HTMLInputElement).checked; h.onChange(); };
   $<HTMLSelectElement>("height").onchange = (e) => { state.height = (e.target as HTMLSelectElement).value as State["height"]; h.onChange(); };
   el.querySelectorAll<HTMLInputElement>('input[name="conf"]').forEach((r) =>
