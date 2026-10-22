@@ -46,14 +46,8 @@ def parcel_base(parcels: gpd.GeoDataFrame, e911: gpd.GeoDataFrame, blocks: gpd.G
     }).drop_duplicates("parcel_id")
 
     pt = e911.copy()
-    by_key = pt["map_bk_lot"].where(pt["map_bk_lot"].isin(base["parcel_id"]))
-    unkeyed = pt[by_key.isna()]
-    if len(unkeyed):
-        hit = gpd.sjoin(unkeyed[["geometry"]], parcels[["parcel_id", "geometry"]], predicate="within", how="left")
-        hit = hit[~hit.index.duplicated()]
-        by_key = by_key.fillna(hit["parcel_id"])
-    pt["parcel_id"] = by_key
-    pt = pt[pt["parcel_id"].isin(base["parcel_id"])]
+    pt["parcel_id"] = assign_points(e911, parcels, set(base["parcel_id"]))
+    pt = pt[pt["parcel_id"].notna()]
 
     ptype = pt["place_type"].fillna("").str.strip()
     unit = pt["unit"].fillna("").str.strip()
@@ -67,6 +61,18 @@ def parcel_base(parcels: gpd.GeoDataFrame, e911: gpd.GeoDataFrame, blocks: gpd.G
     base["raw_units"] = base["raw_units"].fillna(0).astype(int)
     base["gq_site"] = base["parcel_id"].isin(set(pt.loc[pt["gq_site"], "parcel_id"]))
     return base.reset_index(drop=True)
+
+
+def assign_points(e911: gpd.GeoDataFrame, parcels: gpd.GeoDataFrame, parcel_ids: set[str]) -> pd.Series:
+    """Parcel for each address point: its parcel key when that key exists, else the
+    parcel it falls inside. None when neither lands on one of `parcel_ids`."""
+    by_key = e911["map_bk_lot"].where(e911["map_bk_lot"].isin(parcel_ids))
+    unkeyed = e911[by_key.isna()]
+    if len(unkeyed):
+        hit = gpd.sjoin(unkeyed[["geometry"]], parcels[["parcel_id", "geometry"]], predicate="within", how="left")
+        hit = hit[~hit.index.duplicated()]
+        by_key = by_key.fillna(hit["parcel_id"])
+    return by_key.where(by_key.isin(parcel_ids))
 
 
 def _largest_remainder(weights: np.ndarray, total: int) -> np.ndarray:

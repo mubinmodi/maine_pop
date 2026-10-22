@@ -1,0 +1,5 @@
+data/raw/
+data/interim/
+data/runs/
+.venv/
+app/node_modules/

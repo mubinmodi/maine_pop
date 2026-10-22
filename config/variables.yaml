@@ -161,6 +161,86 @@ variables:
       - {id: "yes", label: "65+ without diploma"}
       - {id: "no", label: "Everyone else"}
 
+  # Age crossed with sex, for the age-sex pyramid. Derived, so it needs no code.
+  - id: age_sex
+    label: Age and sex
+    kind: derived
+    unit: person
+    rules:
+      - {category: male_a0_4, when: "sex == 'male' and age_group == 'a0_4'"}
+      - {category: male_a5_9, when: "sex == 'male' and age_group == 'a5_9'"}
+      - {category: male_a10_14, when: "sex == 'male' and age_group == 'a10_14'"}
+      - {category: male_a15_19, when: "sex == 'male' and age_group == 'a15_19'"}
+      - {category: male_a20_24, when: "sex == 'male' and age_group == 'a20_24'"}
+      - {category: male_a25_29, when: "sex == 'male' and age_group == 'a25_29'"}
+      - {category: male_a30_34, when: "sex == 'male' and age_group == 'a30_34'"}
+      - {category: male_a35_39, when: "sex == 'male' and age_group == 'a35_39'"}
+      - {category: male_a40_44, when: "sex == 'male' and age_group == 'a40_44'"}
+      - {category: male_a45_49, when: "sex == 'male' and age_group == 'a45_49'"}
+      - {category: male_a50_54, when: "sex == 'male' and age_group == 'a50_54'"}
+      - {category: male_a55_59, when: "sex == 'male' and age_group == 'a55_59'"}
+      - {category: male_a60_64, when: "sex == 'male' and age_group == 'a60_64'"}
+      - {category: male_a65_69, when: "sex == 'male' and age_group == 'a65_69'"}
+      - {category: male_a70_74, when: "sex == 'male' and age_group == 'a70_74'"}
+      - {category: male_a75_79, when: "sex == 'male' and age_group == 'a75_79'"}
+      - {category: male_a80_84, when: "sex == 'male' and age_group == 'a80_84'"}
+      - {category: male_a85_plus, when: "sex == 'male' and age_group == 'a85_plus'"}
+      - {category: female_a0_4, when: "sex == 'female' and age_group == 'a0_4'"}
+      - {category: female_a5_9, when: "sex == 'female' and age_group == 'a5_9'"}
+      - {category: female_a10_14, when: "sex == 'female' and age_group == 'a10_14'"}
+      - {category: female_a15_19, when: "sex == 'female' and age_group == 'a15_19'"}
+      - {category: female_a20_24, when: "sex == 'female' and age_group == 'a20_24'"}
+      - {category: female_a25_29, when: "sex == 'female' and age_group == 'a25_29'"}
+      - {category: female_a30_34, when: "sex == 'female' and age_group == 'a30_34'"}
+      - {category: female_a35_39, when: "sex == 'female' and age_group == 'a35_39'"}
+      - {category: female_a40_44, when: "sex == 'female' and age_group == 'a40_44'"}
+      - {category: female_a45_49, when: "sex == 'female' and age_group == 'a45_49'"}
+      - {category: female_a50_54, when: "sex == 'female' and age_group == 'a50_54'"}
+      - {category: female_a55_59, when: "sex == 'female' and age_group == 'a55_59'"}
+      - {category: female_a60_64, when: "sex == 'female' and age_group == 'a60_64'"}
+      - {category: female_a65_69, when: "sex == 'female' and age_group == 'a65_69'"}
+      - {category: female_a70_74, when: "sex == 'female' and age_group == 'a70_74'"}
+      - {category: female_a75_79, when: "sex == 'female' and age_group == 'a75_79'"}
+      - {category: female_a80_84, when: "sex == 'female' and age_group == 'a80_84'"}
+      - {category: female_a85_plus, when: "sex == 'female' and age_group == 'a85_plus'"}
+    categories:
+      - {id: male_a0_4, label: "Male 0–4"}
+      - {id: male_a5_9, label: "Male 5–9"}
+      - {id: male_a10_14, label: "Male 10–14"}
+      - {id: male_a15_19, label: "Male 15–19"}
+      - {id: male_a20_24, label: "Male 20–24"}
+      - {id: male_a25_29, label: "Male 25–29"}
+      - {id: male_a30_34, label: "Male 30–34"}
+      - {id: male_a35_39, label: "Male 35–39"}
+      - {id: male_a40_44, label: "Male 40–44"}
+      - {id: male_a45_49, label: "Male 45–49"}
+      - {id: male_a50_54, label: "Male 50–54"}
+      - {id: male_a55_59, label: "Male 55–59"}
+      - {id: male_a60_64, label: "Male 60–64"}
+      - {id: male_a65_69, label: "Male 65–69"}
+      - {id: male_a70_74, label: "Male 70–74"}
+      - {id: male_a75_79, label: "Male 75–79"}
+      - {id: male_a80_84, label: "Male 80–84"}
+      - {id: male_a85_plus, label: "Male 85+"}
+      - {id: female_a0_4, label: "Female 0–4"}
+      - {id: female_a5_9, label: "Female 5–9"}
+      - {id: female_a10_14, label: "Female 10–14"}
+      - {id: female_a15_19, label: "Female 15–19"}
+      - {id: female_a20_24, label: "Female 20–24"}
+      - {id: female_a25_29, label: "Female 25–29"}
+      - {id: female_a30_34, label: "Female 30–34"}
+      - {id: female_a35_39, label: "Female 35–39"}
+      - {id: female_a40_44, label: "Female 40–44"}
+      - {id: female_a45_49, label: "Female 45–49"}
+      - {id: female_a50_54, label: "Female 50–54"}
+      - {id: female_a55_59, label: "Female 55–59"}
+      - {id: female_a60_64, label: "Female 60–64"}
+      - {id: female_a65_69, label: "Female 65–69"}
+      - {id: female_a70_74, label: "Female 70–74"}
+      - {id: female_a75_79, label: "Female 75–79"}
+      - {id: female_a80_84, label: "Female 80–84"}
+      - {id: female_a85_plus, label: "Female 85+"}
+
   # Example of an attached variable. The build skips attached variables until an
   # attach step exists; it is listed so the schema shape is settled.
   # - id: diabetes

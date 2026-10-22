@@ -7,7 +7,7 @@ Synthetic estimates for Portland, Maine, aggregated from parcels, compared with 
 - **City people**: 68,711 ± 506 synthetic vs 68,854 ± 52 ACS (90% margins; difference -0.2%)
 - **City households**: 33,287 ± 555 synthetic vs 32,965 ± 785 ACS (90% margins; difference +1.0%)
 - **City people 65+**: 11,482 ± 749 synthetic vs 11,616 ± 772 ACS (90% margins; difference -1.2%)
-- **Block-group cells inside the ACS 90% margin**: 99.8% of 2,907
+- **Block-group cells inside the ACS 90% margin**: 99.9% of 5,103
 - **Held-out blocks, population share**: correlation 0.83 with 2020 Census (land-area baseline 0.68) across 162 blocks
 
 ## 1. Fit to published ACS, by level
@@ -18,6 +18,7 @@ Synthetic counts from the main run, summed up from parcels, against ACS 2020–2
 |---|---|---|---|---|---|---|
 | block_group | age65_plus | 122 | 100% | 0.04 | 68,711 | 68,761 |
 | block_group | age_group | 1,098 | 100% | 0.04 | 68,711 | 68,761 |
+| block_group | age_sex | 2,196 | 100% | 0.04 | 68,711 | 68,761 |
 | block_group | education | 244 | 100% | 0.04 | 52,237 | 52,208 |
 | block_group | household_size | 305 | 100% | 0.05 | 33,287 | 32,910 |
 | block_group | households | 61 | 100% | 0.08 | 33,287 | 32,910 |
@@ -30,6 +31,7 @@ Synthetic counts from the main run, summed up from parcels, against ACS 2020–2
 | block_group | tenure | 122 | 100% | 0.08 | 33,287 | 32,910 |
 | tract | age65_plus | 38 | 100% | 0.05 | 67,665 | 67,722 |
 | tract | age_group | 342 | 100% | 0.05 | 67,665 | 67,722 |
+| tract | age_sex | 684 | 100% | 0.05 | 67,665 | 67,722 |
 | tract | education | 76 | 100% | 0.05 | 51,344 | 51,298 |
 | tract | household_size | 95 | 100% | 0.08 | 32,767 | 32,385 |
 | tract | households | 19 | 100% | 0.13 | 32,767 | 32,385 |
@@ -42,6 +44,7 @@ Synthetic counts from the main run, summed up from parcels, against ACS 2020–2
 | tract | tenure | 38 | 100% | 0.10 | 32,767 | 32,385 |
 | city | age65_plus | 2 | 100% | 0.09 | 68,711 | 68,854 |
 | city | age_group | 18 | 100% | 0.08 | 68,711 | 68,854 |
+| city | age_sex | 36 | 100% | 0.10 | 68,711 | 68,854 |
 | city | education | 4 | 100% | 0.18 | 52,237 | 52,291 |
 | city | household_size | 5 | 100% | 0.22 | 33,287 | 32,965 |
 | city | households | 1 | 100% | 0.41 | 33,287 | 32,965 |

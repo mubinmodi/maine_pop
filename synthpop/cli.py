@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import time
+from pathlib import Path
 
 from .catalog import Catalog
 from .config import ROOT, StudyArea
@@ -111,6 +112,34 @@ def cmd_validate(args) -> None:
         print(f"  {k}: {v}")
 
 
+def cmd_publish(args) -> None:
+    from pathlib import Path
+
+    import pandas as pd
+
+    from .publish import publish
+
+    sources = _sources(args)
+    cap = pd.read_parquet(Path(args.data) / "runs" / "main" / "capacity.parquet")
+    counts = publish(sources.load_all(), cap, sources.area, Path(args.data) / "out")
+    print("published areas:", ", ".join(f"{k} {v:,}" for k, v in counts.items()))
+
+
+def cmd_build(args) -> None:
+    """The whole build after fetch: run, summarize, validate, publish."""
+    for step in (cmd_run, cmd_summarize, cmd_validate, cmd_publish):
+        print(f"== {step.__name__[4:]}")
+        step(args)
+
+
+def cmd_serve(args) -> None:
+    import uvicorn
+
+    from .api import create_app
+
+    uvicorn.run(create_app(Path(args.data) / "out", args.variables), host=args.host, port=args.port)
+
+
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(prog="synthpop")
     p.add_argument("--data", default=str(ROOT / "data"))
@@ -128,6 +157,16 @@ def main(argv=None) -> None:
     v = sub.add_parser("validate", help="write docs/validation.md")
     v.add_argument("--docs", default=str(ROOT / "docs"))
     v.set_defaults(func=cmd_validate)
+    sub.add_parser("publish", help="areas, geometry and search index for the app").set_defaults(func=cmd_publish)
+    b = sub.add_parser("build", help="run, summarize, validate and publish")
+    b.add_argument("--replicates", type=int)
+    b.add_argument("--draws", type=int)
+    b.add_argument("--docs", default=str(ROOT / "docs"))
+    b.set_defaults(func=cmd_build)
+    s = sub.add_parser("serve", help="API and app on http://localhost:8000")
+    s.add_argument("--host", default="127.0.0.1")
+    s.add_argument("--port", type=int, default=8000)
+    s.set_defaults(func=cmd_serve)
     args = p.parse_args(argv)
     args.func(args)
 
