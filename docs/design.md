@@ -84,7 +84,7 @@ placed = model.run(inputs, run=Run.main())             # or Run.replicate(17), R
 ```
 
 **Hides**
-1. **IPF** per block group. It fits seed household weights (WGTP, or replicate weight r) to the ACS block-group constraints named in the catalog, using household-level and person-level totals.
+1. **Penalized maximum-entropy fit** (P-MEDM style) per block group. It fits seed household and group-quarters weights (WGTP/PWGTP, or replicate weight r) to the ACS block-group constraints named in the catalog, using household-level and person-level totals.
 2. **Integerization** of the weights into whole households (truncate, then sample the remainder).
 3. **Block split**: households are spread across blocks using 2020 Census housing-unit and population counts. Held-out blocks don't get these counts.
 4. **Placement** of households on parcels:
@@ -95,7 +95,7 @@ placed = model.run(inputs, run=Run.main())             # or Run.replicate(17), R
 
 Totals always add up, because every household lands on exactly one parcel.
 
-**Seam**: none at the interface. It's in-process, tested on fixtures. There are internal seams (`ipf`, `integerize`, `place`) with their own tests. IPF could be swapped for P-MEDM later without callers changing (see [ADR 0002](adr/0002-ipf-before-pmedm.md)).
+**Seam**: none at the interface. It's in-process, tested on fixtures. There are internal seams (`fit`, `place`) with their own tests. Why the fit is P-MEDM style rather than plain IPF is in [ADR 0002](adr/0002-penalized-entropy-fit.md).
 
 ### `summarize`: area stats
 

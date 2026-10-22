@@ -6,7 +6,7 @@ Deliverable 1. A parcel-level synthetic population for the City of Portland, Mai
  PUBLIC DATA            BUILD (Python, run once per vintage)                       SERVE                    USE
 ┌──────────────┐   ┌─────────┐   ┌───────────────────┐   ┌───────────┐   ┌─────────┐   ┌────────┐   ┌──────────────────┐
 │ PUMS 5-year  │   │         │   │ model             │   │           │   │         │   │        │   │ app              │
-│ ACS 5-year   │──►│ sources │──►│  IPF per BG       │──►│ summarize │──►│ publish │──►│ atlas  │──►│ deck.gl+MapLibre │
+│ ACS 5-year   │──►│ sources │──►│  entropy fit / BG │──►│ summarize │──►│ publish │──►│ atlas  │──►│ deck.gl+MapLibre │
 │ TIGER 2020   │   │ fetch,  │   │  × 81 runs        │   │ every     │   │ Parquet │   │ DuckDB │   │ 3D, zoom levels, │
 │ ME parcels   │   │ clip,   │   │  place on parcels │   │ level,    │   │ GeoJSON │   │ api    │   │ panel, filters,  │
 │ ME E911      │   │ cache   │   │  (E911 units)     │   │ SE        │   │ DuckDB  │   │FastAPI │   │ search, export   │
@@ -37,7 +37,7 @@ The variables, constraint tables and category mappings all live in `config/varia
 
 For each of 81 runs (the main run plus 80 replicate runs, one per PUMS replicate weight set), in every block group:
 
-1. **Fit.** IPF reweights the PUMA's seed households and group-quarters persons to that block group's ACS totals: sex × age, race/ethnicity, education (25+), household vs group quarters, household size, and tenure × units in structure.
+1. **Fit.** A penalized maximum-entropy fit (P-MEDM style, [ADR 0002](adr/0002-penalized-entropy-fit.md)) reweights the PUMA's seed households and group-quarters persons to that block group's ACS totals: sex × age, race/ethnicity, education (25+), household vs group quarters, household size, and tenure × units in structure.
 2. **Integerize.** Turn weights into whole synthetic households.
 3. **Place.** Put each household on a housing unit on a parcel:
    - Unit counts come from E911 points per parcel, calibrated to 2020 block housing counts.
