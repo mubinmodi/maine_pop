@@ -1,0 +1,271 @@
+# The variable schema shared by the model, the API and the app.
+#
+# Add a variable here and rebuild: it appears in /schema, the map selector,
+# filters, the detail panel and exports with no code changes.
+#
+# kinds
+#   seed      recoded from a PUMS column (rules: first match wins; bins: inclusive ranges)
+#   derived   computed from other variables' categories
+#   attached  joined from an outside dataset (schema only for now; skipped by the build)
+#
+# `when` strings are pandas query expressions. For seed variables they see PUMS
+# columns; for derived variables they see other variables' category columns.
+
+levels: [parcel, block, block_group, tract, city, county, state]
+
+variables:
+  - id: sex
+    label: Sex
+    kind: seed
+    unit: person
+    rules:
+      - {category: male, when: "SEX == 1"}
+      - {category: female, when: "SEX == 2"}
+    categories:
+      - {id: male, label: Male}
+      - {id: female, label: Female}
+
+  - id: age_group
+    label: Age
+    kind: seed
+    unit: person
+    bins:
+      column: AGEP
+      edges: [[0, 4], [5, 9], [10, 14], [15, 19], [20, 24], [25, 29], [30, 34], [35, 39], [40, 44],
+              [45, 49], [50, 54], [55, 59], [60, 64], [65, 69], [70, 74], [75, 79], [80, 84], [85, 200]]
+    categories:
+      - {id: a0_4, label: "0–4"}
+      - {id: a5_9, label: "5–9"}
+      - {id: a10_14, label: "10–14"}
+      - {id: a15_19, label: "15–19"}
+      - {id: a20_24, label: "20–24"}
+      - {id: a25_29, label: "25–29"}
+      - {id: a30_34, label: "30–34"}
+      - {id: a35_39, label: "35–39"}
+      - {id: a40_44, label: "40–44"}
+      - {id: a45_49, label: "45–49"}
+      - {id: a50_54, label: "50–54"}
+      - {id: a55_59, label: "55–59"}
+      - {id: a60_64, label: "60–64"}
+      - {id: a65_69, label: "65–69"}
+      - {id: a70_74, label: "70–74"}
+      - {id: a75_79, label: "75–79"}
+      - {id: a80_84, label: "80–84"}
+      - {id: a85_plus, label: "85+"}
+
+  - id: race_eth
+    label: Race and ethnicity
+    kind: seed
+    unit: person
+    rules:
+      - {category: hispanic, when: "HISP != 1"}
+      - {category: white, when: "RAC1P == 1"}
+      - {category: black, when: "RAC1P == 2"}
+      - {category: asian, when: "RAC1P == 6"}
+      - {category: other, when: "RAC1P == RAC1P"}
+    categories:
+      - {id: white, label: "White, non-Hispanic"}
+      - {id: black, label: "Black, non-Hispanic"}
+      - {id: asian, label: "Asian, non-Hispanic"}
+      - {id: other, label: "Other or multiracial, non-Hispanic"}
+      - {id: hispanic, label: "Hispanic (any race)"}
+
+  - id: education
+    label: Educational attainment (25+)
+    kind: seed
+    unit: person
+    universe: "AGEP >= 25"
+    rules:
+      - {category: lt_hs, when: "SCHL <= 15"}
+      - {category: hs, when: "SCHL <= 17"}
+      - {category: some_college, when: "SCHL <= 20"}
+      - {category: ba_plus, when: "SCHL <= 24"}
+    categories:
+      - {id: lt_hs, label: "Less than high school"}
+      - {id: hs, label: "High school or GED"}
+      - {id: some_college, label: "Some college or associate"}
+      - {id: ba_plus, label: "Bachelor's or higher"}
+
+  - id: living_quarters
+    label: Living quarters
+    kind: seed
+    unit: person
+    rules:
+      - {category: household, when: "TYPEHUGQ == 1"}
+      - {category: group_quarters, when: "TYPEHUGQ != 1"}
+    categories:
+      - {id: household, label: "In a household"}
+      - {id: group_quarters, label: "In group quarters"}
+
+  - id: household_size
+    label: Household size
+    kind: seed
+    unit: household
+    bins:
+      column: NP
+      edges: [[1, 1], [2, 2], [3, 3], [4, 4], [5, 99]]
+    categories:
+      - {id: p1, label: "1 person"}
+      - {id: p2, label: "2 people"}
+      - {id: p3, label: "3 people"}
+      - {id: p4, label: "4 people"}
+      - {id: p5_plus, label: "5+ people"}
+
+  - id: tenure
+    label: Tenure
+    kind: seed
+    unit: household
+    rules:
+      - {category: owner, when: "TEN in [1, 2]"}
+      - {category: renter, when: "TEN in [3, 4]"}
+    categories:
+      - {id: owner, label: Owner}
+      - {id: renter, label: Renter}
+
+  - id: structure
+    label: Units in structure
+    kind: seed
+    unit: household
+    rules:
+      - {category: single, when: "BLD in [2, 3]"}
+      - {category: units_2_4, when: "BLD in [4, 5]"}
+      - {category: units_5_19, when: "BLD in [6, 7]"}
+      - {category: units_20_plus, when: "BLD in [8, 9]"}
+      - {category: mobile_other, when: "BLD in [1, 10]"}
+    categories:
+      - {id: single, label: "Single-family"}
+      - {id: units_2_4, label: "2–4 units"}
+      - {id: units_5_19, label: "5–19 units"}
+      - {id: units_20_plus, label: "20+ units"}
+      - {id: mobile_other, label: "Mobile home or other"}
+
+  - id: age65_plus
+    label: Aged 65+
+    kind: derived
+    unit: person
+    rules:
+      - {category: "yes", when: "age_group in ['a65_69', 'a70_74', 'a75_79', 'a80_84', 'a85_plus']"}
+      - {category: "no", when: "age_group == age_group"}
+    categories:
+      - {id: "yes", label: "65+"}
+      - {id: "no", label: "Under 65"}
+
+  - id: age65_no_hs
+    label: Aged 65+ without a high school diploma
+    kind: derived
+    unit: person
+    rules:
+      - {category: "yes", when: "age65_plus == 'yes' and education == 'lt_hs'"}
+      - {category: "no", when: "age_group == age_group"}
+    categories:
+      - {id: "yes", label: "65+ without diploma"}
+      - {id: "no", label: "Everyone else"}
+
+  # Example of an attached variable. The build skips attached variables until an
+  # attach step exists; it is listed so the schema shape is settled.
+  # - id: diabetes
+  #   label: Diagnosed diabetes (modelled)
+  #   kind: attached
+  #   unit: person
+  #   source: {dataset: cdc_places, measure: DIABETES, join: [tract, age_group, sex]}
+  #   categories: [{id: "yes", label: Diabetes}, {id: "no", label: "No diabetes"}]
+
+# Block-group constraints for the model, and published figures for validation and
+# comparison. Keys are category combinations joined by "|", in the order of `by`.
+# Cells are ACS table cells; a leading "-" subtracts.
+constraints:
+  - id: sex_age
+    unit: person
+    by: [sex, age_group]
+    cells:
+      "male|a0_4": [B01001_003]
+      "male|a5_9": [B01001_004]
+      "male|a10_14": [B01001_005]
+      "male|a15_19": [B01001_006, B01001_007]
+      "male|a20_24": [B01001_008, B01001_009, B01001_010]
+      "male|a25_29": [B01001_011]
+      "male|a30_34": [B01001_012]
+      "male|a35_39": [B01001_013]
+      "male|a40_44": [B01001_014]
+      "male|a45_49": [B01001_015]
+      "male|a50_54": [B01001_016]
+      "male|a55_59": [B01001_017]
+      "male|a60_64": [B01001_018, B01001_019]
+      "male|a65_69": [B01001_020, B01001_021]
+      "male|a70_74": [B01001_022]
+      "male|a75_79": [B01001_023]
+      "male|a80_84": [B01001_024]
+      "male|a85_plus": [B01001_025]
+      "female|a0_4": [B01001_027]
+      "female|a5_9": [B01001_028]
+      "female|a10_14": [B01001_029]
+      "female|a15_19": [B01001_030, B01001_031]
+      "female|a20_24": [B01001_032, B01001_033, B01001_034]
+      "female|a25_29": [B01001_035]
+      "female|a30_34": [B01001_036]
+      "female|a35_39": [B01001_037]
+      "female|a40_44": [B01001_038]
+      "female|a45_49": [B01001_039]
+      "female|a50_54": [B01001_040]
+      "female|a55_59": [B01001_041]
+      "female|a60_64": [B01001_042, B01001_043]
+      "female|a65_69": [B01001_044, B01001_045]
+      "female|a70_74": [B01001_046]
+      "female|a75_79": [B01001_047]
+      "female|a80_84": [B01001_048]
+      "female|a85_plus": [B01001_049]
+
+  - id: race_eth
+    unit: person
+    by: [race_eth]
+    cells:
+      white: [B03002_003]
+      black: [B03002_004]
+      asian: [B03002_006]
+      other: [B03002_005, B03002_007, B03002_008, B03002_009]
+      hispanic: [B03002_012]
+
+  - id: education
+    unit: person
+    by: [education]
+    cells:
+      lt_hs: [B15003_002, B15003_003, B15003_004, B15003_005, B15003_006, B15003_007, B15003_008,
+              B15003_009, B15003_010, B15003_011, B15003_012, B15003_013, B15003_014, B15003_015, B15003_016]
+      hs: [B15003_017, B15003_018]
+      some_college: [B15003_019, B15003_020, B15003_021]
+      ba_plus: [B15003_022, B15003_023, B15003_024, B15003_025]
+
+  - id: living_quarters
+    unit: person
+    by: [living_quarters]
+    cells:
+      household: [B25008_001]
+      group_quarters: [B01001_001, "-B25008_001"]
+
+  - id: household_size
+    unit: household
+    by: [household_size]
+    cells:
+      p1: [B11016_010]
+      p2: [B11016_003, B11016_011]
+      p3: [B11016_004, B11016_012]
+      p4: [B11016_005, B11016_013]
+      p5_plus: [B11016_006, B11016_007, B11016_008, B11016_014, B11016_015, B11016_016]
+
+  - id: tenure_structure
+    unit: household
+    by: [tenure, structure]
+    cells:
+      "owner|single": [B25032_003, B25032_004]
+      "owner|units_2_4": [B25032_005, B25032_006]
+      "owner|units_5_19": [B25032_007, B25032_008]
+      "owner|units_20_plus": [B25032_009, B25032_010]
+      "owner|mobile_other": [B25032_011, B25032_012]
+      "renter|single": [B25032_014, B25032_015]
+      "renter|units_2_4": [B25032_016, B25032_017]
+      "renter|units_5_19": [B25032_018, B25032_019]
+      "renter|units_20_plus": [B25032_020, B25032_021]
+      "renter|mobile_other": [B25032_022, B25032_023]
+
+# Extra ACS tables the model reads that are not variables.
+model_tables: [B25002]
