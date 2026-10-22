@@ -1,7 +1,7 @@
 """Synthesis and placement.
 
     inputs = model.prepare(data, catalog, area)     # once
-    placed = model.run(inputs, Run.main())          # or Run.replicate(r), Run.validation(...)
+    placed = model.run(inputs, Run.main())          # or Run.draw(d), Run.replicate(r), Run.validation(...)
 
 Every run fits seed units to each block group's ACS totals (IPU), turns the
 weights into whole households and group-quarters residents, and places every
@@ -25,13 +25,21 @@ __all__ = ["Run", "Inputs", "Placed", "prepare", "run", "holdout_blocks"]
 
 @dataclass(frozen=True)
 class Run:
-    kind: str                         # "main", "replicate" or "validation"
+    kind: str                         # "main", "draw", "replicate" or "validation"
     r: int = 0                        # replicate weight set, 1..80 for replicate runs
     holdout: frozenset[str] = frozenset()
+    d: int = 0                        # placement draw; replicate and validation runs share draw 0 with main
 
     @classmethod
     def main(cls) -> "Run":
         return cls("main")
+
+    @classmethod
+    def draw(cls, d: int) -> "Run":
+        """The main run with a different placement draw (same weights and targets)."""
+        if d < 1:
+            raise ValueError("placement draws are numbered from 1")
+        return cls("draw", 0, frozenset(), d)
 
     @classmethod
     def replicate(cls, r: int) -> "Run":
@@ -45,7 +53,7 @@ class Run:
 
     @property
     def name(self) -> str:
-        return self.kind if self.kind != "replicate" else f"replicate_{self.r:02d}"
+        return {"replicate": f"replicate_{self.r:02d}", "draw": f"draw_{self.d:02d}"}.get(self.kind, self.kind)
 
 
 @dataclass
@@ -98,7 +106,8 @@ def prepare(data: dict, catalog: Catalog, area: StudyArea) -> Inputs:
     cells = []
     for c in catalog.constraints:
         for key, acs in c.cells.items():
-            cells.append({"constraint": c.id, "key": key, "unit_kind": c.unit, "by": c.by, "acs": acs})
+            cells.append({"constraint": c.id, "key": key, "unit_kind": c.unit, "by": c.by, "acs": acs,
+                          "exact": c.exact})
     cells = pd.DataFrame(cells)
 
     A = np.zeros((len(cells), len(units)))
@@ -163,7 +172,11 @@ def holdout_blocks(inputs: Inputs, fraction: float, seed: int) -> frozenset[str]
 # ---------------------------------------------------------------------- run
 
 def run(inputs: Inputs, spec: Run) -> Placed:
-    rng = np.random.default_rng([inputs.area.random_seed, {"main": 0, "replicate": 1, "validation": 2}[spec.kind], spec.r])
+    # Two streams. Targets: only replicate runs perturb them. Placement: shared by main,
+    # replicate and validation runs (common random numbers), so replicate differences
+    # measure survey uncertainty, and placement uncertainty comes from separate draws.
+    rng_targets = np.random.default_rng([inputs.area.random_seed, 1, spec.r])
+    rng = np.random.default_rng([inputs.area.random_seed, 0, spec.d])
     w0 = inputs.weights[spec.r]
     is_hh = (inputs.units["kind"] == "household").to_numpy()
 
@@ -173,8 +186,11 @@ def run(inputs: Inputs, spec: Run) -> Placed:
         if spec.kind == "replicate":
             # SDR replicates have half the target's SE each; perturbing targets this way
             # carries ACS sampling error into the replicate spread (4/80 · Σ = variance).
-            t = np.clip(t + rng.normal(0, inputs.target_se.loc[bg].to_numpy(float) / 2), 0, None)
-        fit: Fit = fit_weights(inputs.A, w0, t, inputs.target_se.loc[bg].to_numpy(float))
+            # Exact cells are controls (population totals), so they stay fixed.
+            noise_sd = np.where(inputs.cells["exact"].to_numpy(), 0.0, inputs.target_se.loc[bg].to_numpy(float) / 2)
+            t = np.clip(t + rng_targets.normal(0, noise_sd), 0, None)
+        se = np.where(inputs.cells["exact"].to_numpy(), 0.0, inputs.target_se.loc[bg].to_numpy(float))
+        fit: Fit = fit_weights(inputs.A, w0, t, se)
         n = np.zeros(len(w0), dtype=int)
         n[is_hh] = integerize(fit.weights[is_hh], rng)
         n[~is_hh] = integerize(fit.weights[~is_hh], rng)

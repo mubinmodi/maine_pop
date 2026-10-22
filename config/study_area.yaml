@@ -16,4 +16,5 @@ vintages:
 model:
   replicates: 80            # PUMS replicate weight sets
   holdout_fraction: 0.2     # blocks hidden in the validation run
+  placement_draws: 20       # extra placements of the main run, for parcel expected values
   random_seed: 20261022

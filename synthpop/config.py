@@ -25,6 +25,7 @@ class StudyArea:
     blocks_year: int
     replicates: int
     holdout_fraction: float
+    placement_draws: int
     random_seed: int
 
     @property
@@ -43,6 +44,6 @@ class StudyArea:
             name=raw["name"], state_fips=str(raw["state_fips"]), county_fips=str(raw["county_fips"]),
             place_fips=str(raw["place_fips"]), place_name=raw["place_name"], puma=str(raw["puma"]),
             e911_town=raw["e911_town"], acs_year=v["acs"], pums_year=v["pums"], tiger_year=v["tiger"],
-            blocks_year=v["blocks"], replicates=m["replicates"], holdout_fraction=m["holdout_fraction"],
+            blocks_year=v["blocks"], replicates=m["replicates"], holdout_fraction=m["holdout_fraction"], placement_draws=m.get("placement_draws", 20),
             random_seed=m["random_seed"],
         )

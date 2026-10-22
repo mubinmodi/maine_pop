@@ -33,6 +33,7 @@ def cmd_run(args) -> None:
     inputs = model.prepare(sources.load_all(), catalog, area)
     holdout = model.holdout_blocks(inputs, area.holdout_fraction, area.random_seed)
     specs = [model.Run.main(), model.Run.validation(holdout)]
+    specs += [model.Run.draw(d) for d in range(1, (args.draws if args.draws is not None else area.placement_draws) + 1)]
     specs += [model.Run.replicate(r) for r in range(1, (args.replicates or area.replicates) + 1)]
     out = Path(args.data) / "runs"
     for spec in specs:
@@ -50,6 +51,66 @@ def cmd_run(args) -> None:
     (out / "holdout_blocks.txt").write_text("\n".join(sorted(holdout)) + "\n")
 
 
+def cmd_summarize(args) -> None:
+    """Area stats from the saved runs: data/out/area_stats.parquet (main run plus
+    published ACS rows) and data/out/validation_stats.parquet."""
+    from pathlib import Path
+
+    import pandas as pd
+
+    from . import summarize as S
+
+    sources = _sources(args)
+    area, catalog = sources.area, sources.catalog
+    runs, out = Path(args.data) / "runs", Path(args.data) / "out"
+    out.mkdir(parents=True, exist_ok=True)
+    reps = sorted(runs.glob("replicate_*"))
+    draws = [runs / "main"] + sorted(runs.glob("draw_*"))
+    t = time.time()
+    stats = S.summarize([S.load_run(d) for d in draws], (S.load_run(d) for d in reps), catalog, area.place_geoid)
+    pub = S.published(sources.load("acs"), catalog)
+    pd.concat([stats, pub], ignore_index=True).to_parquet(out / "area_stats.parquet", index=False)
+    val = S.summarize([S.load_run(runs / "validation")], [], catalog, area.place_geoid)
+    val.to_parquet(out / "validation_stats.parquet", index=False)
+    print(f"area_stats: {len(stats):,} synthetic + {len(pub):,} published rows from {len(reps)} replicates "
+          f"and {len(draws)} placement draws ({time.time() - t:.1f}s)")
+
+
+def cmd_validate(args) -> None:
+    from pathlib import Path
+
+    import pandas as pd
+
+    from .validate import validate
+
+    sources = _sources(args)
+    runs, out = Path(args.data) / "runs", Path(args.data) / "out"
+    stats = pd.read_parquet(out / "area_stats.parquet")
+    pub = stats[stats["source"] == "published"]
+    hh = pd.read_parquet(runs / "main" / "households.parquet")
+    cap = pd.read_parquet(runs / "main" / "capacity.parquet")
+    fits = pd.read_parquet(runs / "main" / "fits.parquet")
+    persons = pd.read_parquet(runs / "main" / "persons.parquet", columns=["household_id"])
+    city = pub[(pub["level"] == "city")].set_index(["variable", "category"])["estimate"]
+    match = hh["match"].value_counts(normalize=True)
+    diagnostics = {
+        "converged": fits["converged"].mean(), "iterations": fits["iterations"].median(),
+        "exact": match.get("exact", 0), "nearest": match.get("nearest", 0), "overflow": match.get("overflow", 0),
+        "parcels_with_units": int((cap["units"] > 0).sum()), "fallback": int(cap["fallback"].sum()),
+        "gq_synthetic": float((persons["household_id"] < 0).sum()),
+        "gq_published": float(city.get(("living_quarters", "group_quarters"), float("nan"))),
+    }
+    holdout = frozenset((runs / "holdout_blocks.txt").read_text().split())
+    blocks = pd.DataFrame(sources.load("blocks").drop(columns="geometry"))
+    report = validate(stats[stats["source"] == "synthetic"], pd.read_parquet(out / "validation_stats.parquet"),
+                      pub, blocks, holdout, diagnostics)
+    md = Path(args.docs) / "validation.md"
+    report.write(md, out / "validation")
+    print(f"wrote {md}")
+    for k, v in report.headline.items():
+        print(f"  {k}: {v}")
+
+
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(prog="synthpop")
     p.add_argument("--data", default=str(ROOT / "data"))
@@ -61,7 +122,12 @@ def main(argv=None) -> None:
     f.set_defaults(func=cmd_fetch)
     r = sub.add_parser("run", help="main, validation and replicate model runs")
     r.add_argument("--replicates", type=int, help="fewer replicate runs, for quick checks")
+    r.add_argument("--draws", type=int, help="placement draws of the main run")
     r.set_defaults(func=cmd_run)
+    sub.add_parser("summarize", help="area stats with replicate standard errors").set_defaults(func=cmd_summarize)
+    v = sub.add_parser("validate", help="write docs/validation.md")
+    v.add_argument("--docs", default=str(ROOT / "docs"))
+    v.set_defaults(func=cmd_validate)
     args = p.parse_args(argv)
     args.func(args)
 

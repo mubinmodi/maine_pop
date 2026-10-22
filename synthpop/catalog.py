@@ -43,6 +43,7 @@ class Constraint:
     unit: str
     by: tuple[str, ...]
     cells: dict[str, tuple[str, ...]]            # "male|a0_4" -> ("B01001_003", "-B25008_001")
+    exact: bool = False                          # fit as a hard total instead of within its SE
 
     @property
     def tables(self) -> set[str]:
@@ -73,7 +74,7 @@ class Catalog:
                 raise ValueError(f"constraint {c['id']} uses unknown variables {missing}")
             constraints.append(Constraint(
                 id=c["id"], unit=c["unit"], by=tuple(c["by"]),
-                cells={k: tuple(v) for k, v in c["cells"].items()},
+                cells={k: tuple(v) for k, v in c["cells"].items()}, exact=bool(c.get("exact", False)),
             ))
         return cls(levels=raw["levels"], variables=variables, constraints=constraints,
                    model_tables=list(raw.get("model_tables", [])))
@@ -111,6 +112,10 @@ class Catalog:
         }
 
     # ---------------------------------------------------------------- recoding
+
+    def recode(self, df: pd.DataFrame, variable_id: str) -> pd.Series:
+        """One variable's categories for `df`, which must hold the columns its rules read."""
+        return _recode(df, self.variable(variable_id))
 
     def apply(self, persons: pd.DataFrame, households: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Add one category column per active variable.

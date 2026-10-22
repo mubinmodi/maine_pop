@@ -35,7 +35,7 @@ The variables, constraint tables and category mappings all live in `config/varia
 
 ## 2. Model (`synthpop build`, next)
 
-For each of 81 runs (the main run plus 80 replicate runs, one per PUMS replicate weight set), in every block group:
+For the main run, 20 more placement draws of it, 80 replicate runs (one per PUMS replicate weight set) and one validation run, in every block group:
 
 1. **Fit.** A penalized maximum-entropy fit (P-MEDM style, [ADR 0002](adr/0002-penalized-entropy-fit.md)) reweights the PUMA's seed households and group-quarters persons to that block group's ACS totals: sex × age, race/ethnicity, education (25+), household vs group quarters, household size, and tenure × units in structure.
 2. **Integerize.** Turn weights into whole synthetic households.
@@ -55,7 +55,7 @@ A separate validation run hides 20% of blocks' 2020 counts. It is used only to s
 | `data/out/geo/<level>.geojson` | Simplified geometry per level, ID only | app (fetched once per level) |
 | `data/out/atlas.duckdb` | Views over the two Parquet files, with indexes on `(level, area_id)` and `(level, variable, category)` | atlas |
 
-Synthetic households are kept as Parquet for the main run only. Replicate runs feed the standard errors and are then discarded. Portland's whole output is well under 1 GB.
+Each run's households and people are kept under `data/runs/<run>/` (about 140 MB for Portland). Only the main run is needed after `summarize`. Portland's whole output is well under 1 GB.
 
 ## 4. API (FastAPI, `synthpop serve`)
 

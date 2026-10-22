@@ -78,7 +78,7 @@ Every load is already clipped to the study area and cached.
 
 **Interface**
 ```python
-placed = model.run(inputs, run=Run.main())             # or Run.replicate(17), Run.main(holdout=blocks)
+placed = model.run(inputs, Run.main())                 # or Run.draw(d), Run.replicate(r), Run.validation(blocks)
 # placed.households: household_id, seed_serial, parcel_id, block, block_group
 # placed.persons:    person_id, household_id, catalog category columns
 ```
@@ -101,15 +101,20 @@ Totals always add up, because every household lands on exactly one parcel.
 
 **Interface**
 ```python
-stats = summarize(runs, catalog, areas)
+stats = summarize(draws, replicates, catalog, city_id)   # synthetic rows
+pub = published(acs, catalog)                             # published ACS rows, same columns
 ```
-It takes the main run plus 80 replicate runs and returns a DataFrame in the shared contract.
+`draws` is the main run followed by its placement draws, and `replicates` are the 80 replicate runs. Both outputs follow the shared contract, plus `share` and `share_se`, where a share is the estimate over the variable's universe in that area.
 
 **Hides**
-- Counting categories at the parcel level, then rolling up through block → block group → tract → city.
-- The standard-error formula: SE = sqrt(4/80 · Σ(X_r − X)²), from the PUMS handbook p.18.
-- The confidence rules (coefficient of variation, fallback placement).
-- Privacy: no person-level rows, only counts and distributions.
+- Counting at every level directly from placed people and households, which is the same as rolling up from parcels.
+- **Estimates** are the mean over the 21 placements of the main run, so a parcel shows expected households (e.g. 0.94) rather than one random 0 or 1. Means add up across levels.
+- **Standard errors** combine survey variance and placement variance.
+  - Survey variance comes from the replicate runs: 4/80 · Σ(X_r − X)², from the PUMS handbook p.18. Replicate runs share the main run's placement random numbers.
+  - Below block groups, survey variance is the block group's, scaled by the area's share squared.
+  - Placement variance is the spread across the 21 placements.
+- **Confidence grades** by coefficient of variation: high ≤ 12%, medium ≤ 40%, low above. Fallback and overflow parcels are capped lower.
+- **Published rows** for every variable a constraint covers, including derived ones like `age65_plus`, with MOEs combined as root sum of squares.
 
 **Seam**: none. It's in-process.
 

@@ -235,9 +235,12 @@ constraints:
       some_college: [B15003_019, B15003_020, B15003_021]
       ba_plus: [B15003_022, B15003_023, B15003_024, B15003_025]
 
+  # Exact: without it the fit fills person totals with group-quarters residents,
+  # who are cheap to add, and under-fills household population (docs/validation.md).
   - id: living_quarters
     unit: person
     by: [living_quarters]
+    exact: true
     cells:
       household: [B25008_001]
       group_quarters: [B01001_001, "-B25008_001"]
