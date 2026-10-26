@@ -6,6 +6,8 @@
     atlas.detail("parcel", "162  D021")
     atlas.search("100 Congress")
     atlas.export("parcel", "geojson", filters=[...])
+    atlas.preview({...risk model...}, "block_group")     # a data point, live, unsaved
+    atlas.save_datapoint({...}); atlas.delete_datapoint("diabetes")
 
 Every value carries `source` (synthetic or published). Synthetic values are
 estimates from a synthetic population, never records of real people.
@@ -22,6 +24,9 @@ import duckdb
 import pandas as pd
 
 from .catalog import Catalog
+from .config import ROOT
+from .datapoints import PRESETS, DataPointEngine, DataPointStore, RiskModel
+from .publish import risk_factors
 from .summarize import TOTALS
 
 MAP_LEVELS = [  # zoom ranges the app switches on
@@ -61,14 +66,17 @@ class Filter:
 
 
 class Atlas:
-    def __init__(self, db: duckdb.DuckDBPyConnection, catalog: Catalog, out_dir: Path):
+    def __init__(self, db: duckdb.DuckDBPyConnection, catalog: Catalog, out_dir: Path,
+                 engine: DataPointEngine | None = None, store: DataPointStore | None = None):
         self.db = db
         self.catalog = catalog
         self.out = out_dir
-        self._variables = {v["id"] for v in self.schema()["variables"]}
+        self.engine = engine
+        self.store = store
 
     @classmethod
-    def open(cls, out_dir: str | Path, catalog: Catalog) -> "Atlas":
+    def open(cls, out_dir: str | Path, catalog: Catalog,
+             datapoints_path: str | Path = ROOT / "config" / "datapoints.yaml") -> "Atlas":
         out = Path(out_dir)
         db = duckdb.connect()
         db.execute(f"CREATE TABLE stats AS SELECT * FROM read_parquet('{out / 'area_stats.parquet'}')")
@@ -76,12 +84,22 @@ class Atlas:
         db.execute(f"CREATE TABLE search_index AS SELECT * FROM read_parquet('{out / 'search.parquet'}')")
         db.execute("CREATE INDEX stats_area ON stats(level, area_id)")
         db.execute("CREATE INDEX stats_var ON stats(level, variable, category)")
-        return cls(db, catalog, out)
+        city = db.execute("SELECT area_id FROM areas WHERE level = 'city'").fetchone()
+        engine = DataPointEngine(out, catalog, city[0]) if city else None
+        return cls(db, catalog, out, engine, DataPointStore(datapoints_path, catalog))
 
     def _q(self, sql: str, params: list | None = None):
         """Run a query on its own cursor: the API calls the atlas from several threads,
         and one DuckDB connection refuses concurrent calls."""
         return self.db.cursor().execute(sql, params or [])
+
+    @property
+    def _saved(self) -> dict[str, RiskModel]:
+        return self.store.models if self.store else {}
+
+    @property
+    def _variables(self) -> set[str]:
+        return {v["id"] for v in self.schema()["variables"]}
 
     # ------------------------------------------------------------------ schema
 
@@ -90,13 +108,37 @@ class Atlas:
         totals = [{"id": k, "label": v, "kind": "total", "unit": "household" if k != "population" else "person",
                    "universe": None, "available": True, "categories": [{"id": "total", "label": v}]}
                   for k, v in TOTALS.items()]
+        saved = [{"id": m.id, "label": m.label, "kind": "datapoint", "unit": "person", "universe": m.description,
+                  "available": True, "categories": [{"id": "yes", "label": m.label}], "model": m.to_dict()}
+                 for m in self._saved.values()]
+        factors = [{"id": f, "label": self.catalog.variable(f).label,
+                    "categories": [{"id": c.id, "label": c.label} for c in self.catalog.variable(f).categories]}
+                   for f in risk_factors(self.catalog)]
         return {
             "levels": MAP_LEVELS,
             "compare_with": COMPARE_WITH,
-            "variables": totals + [v for v in base["variables"]],
+            "variables": totals + [v for v in base["variables"]] + saved,
+            "datapoints": {"available": bool(self.engine and self.engine.available), "factors": factors,
+                           "presets": list(PRESETS.values())},
             "confidence": {"high": "CV ≤ 12%", "medium": "CV 12–40%", "low": "CV > 40%"},
             "disclosure": DISCLOSURE,
         }
+
+    # ------------------------------------------------------------------ values
+
+    def _frame(self, level: str, variable: str, category: str) -> pd.DataFrame:
+        """area_id, estimate, se, share, share_se, confidence for one variable at one level."""
+        if variable in self._saved:
+            return self._datapoint_frame(self._saved[variable], level)
+        return self._q(
+            "SELECT area_id, estimate, se, share, share_se, confidence FROM stats "
+            "WHERE level = ? AND source = 'synthetic' AND variable = ? AND category = ?",
+            [level, variable, category]).fetchdf()
+
+    def _datapoint_frame(self, model: RiskModel, level: str) -> pd.DataFrame:
+        if not (self.engine and self.engine.available):
+            raise ValueError("data points need the per-run cells; run `synthpop publish`")
+        return self.engine.compute(model, level)
 
     def _check(self, level: str, variable: str) -> None:
         if level not in COMPARE_WITH:
@@ -110,19 +152,17 @@ class Atlas:
         """Areas at `level` meeting every filter; None when there are no filters."""
         if not filters:
             return None
+        all_ids = None
         keep = None
         for f in filters:
             self._check(level, f.variable)
-            ids = self._q(
-                f"SELECT area_id FROM stats WHERE level = ? AND source = 'synthetic' AND variable = ? "
-                f"AND category = ? AND {f.measure} {OPS[f.op]} ?", [level, f.variable, f.category, f.value]).fetchall()
-            ids = {r[0] for r in ids}
+            frame = self._frame(level, f.variable, f.category)
+            col = frame[f.measure]
+            ids = set(frame.loc[col.map(lambda v: _compare(v, f.op, f.value)), "area_id"])
             if f.op in ("<", "<=") and f.value >= 0:      # areas with no row have 0, which passes
-                all_ids = {r[0] for r in self._q("SELECT area_id FROM areas WHERE level = ?", [level]).fetchall()}
-                present = {r[0] for r in self._q(
-                    "SELECT area_id FROM stats WHERE level = ? AND source='synthetic' AND variable = ? AND category = ?",
-                    [level, f.variable, f.category]).fetchall()}
-                ids |= all_ids - present
+                if all_ids is None:
+                    all_ids = {r[0] for r in self._q("SELECT area_id FROM areas WHERE level = ?", [level]).fetchall()}
+                ids |= all_ids - set(frame["area_id"])
             keep = ids if keep is None else keep & ids
         return keep
 
@@ -132,23 +172,62 @@ class Atlas:
               filters: list[Filter] | None = None) -> dict:
         """Values for every area at one level, for colouring or extruding the map."""
         self._check(level, variable)
-        rows = self._q(
-            "SELECT area_id, estimate, se, share, share_se, confidence FROM stats "
-            "WHERE level = ? AND source = 'synthetic' AND variable = ? AND category = ?",
-            [level, variable, category]).fetchdf()
+        out = self._layer_from(self._frame(level, variable, category), measure, self._passing(level, filters or []))
+        return {"level": level, "variable": variable, "category": category, **out}
+
+    @staticmethod
+    def _layer_from(rows: pd.DataFrame, measure: str, passing: set[str] | None) -> dict:
         value = rows["share"] if measure == "share" else rows["estimate"]
         error = rows["share_se"] if measure == "share" else rows["se"]
-        passing = self._passing(level, filters or [])
         positive = value[value > 0]
         breaks = positive.quantile([0.2, 0.4, 0.6, 0.8]).round(6).tolist() if len(positive) else []
         return {
-            "level": level, "variable": variable, "category": category, "measure": measure, "source": "synthetic",
+            "measure": measure, "source": "synthetic",
             "values": {a: [round(float(v), 6), round(float(e), 6), c, (passing is None or a in passing)]
                        for a, v, e, c in zip(rows["area_id"], value, error, rows["confidence"])},
             "fields": ["value", "se", "confidence", "passes_filters"],
             "breaks": breaks, "max": float(value.max()) if len(value) else 0.0,
             "filtered_count": None if passing is None else len(passing),
         }
+
+    # ------------------------------------------------------------------ data points
+
+    def preview(self, raw: dict, level: str, measure: str = "share", filters: list[Filter] | None = None) -> dict:
+        """A data point computed live from an unsaved risk model: map values for one
+        level, the Portland-wide result and the breakdown by each risk factor."""
+        if level not in COMPARE_WITH:
+            raise KeyError(f"unknown level {level!r}")
+        model = RiskModel.parse(raw, self.catalog)
+        layer = self._layer_from(self._datapoint_frame(model, level), measure, self._passing(level, filters or []))
+        city = self._datapoint_frame(model, "city").iloc[0]
+        return {"level": level, "variable": model.id, "category": "yes", **layer,
+                "city": {"estimate": round(float(city.estimate), 2), "se": round(float(city.se), 2),
+                         "share": round(float(city.share), 5), "share_se": round(float(city.share_se), 5),
+                         "confidence": city.confidence},
+                "breakdown": self.engine.breakdown(model), "model": model.to_dict()}
+
+    def save_datapoint(self, raw: dict) -> dict:
+        model = RiskModel.parse(raw, self.catalog)
+        taken = {v.id for v in self.catalog.variables} | set(TOTALS)
+        self.store.save(model, taken)
+        return model.to_dict()
+
+    def delete_datapoint(self, id: str) -> None:
+        self.store.delete(id)
+
+    def _datapoint_values(self, level: str, area_id: str, models) -> dict:
+        out = {}
+        if not (self.engine and self.engine.available) or level not in COMPARE_WITH:
+            return out
+        for m in models:
+            f = self._datapoint_frame(m, level)
+            row = f[f["area_id"] == area_id]
+            if len(row):
+                r = row.iloc[0]
+                out[m.id] = {"yes": {"estimate": round(float(r.estimate), 3), "se": round(float(r.se), 3),
+                                     "share": round(float(r.share), 5), "share_se": round(float(r.share_se), 5),
+                                     "confidence": r.confidence}}
+        return out
 
     # ------------------------------------------------------------------ detail
 
@@ -171,10 +250,12 @@ class Atlas:
         r["attrs"] = json.loads(r["attrs"]) if isinstance(r.get("attrs"), str) else {}
         return {k: (None if pd.isna(v) else v) if not isinstance(v, dict) else v for k, v in r.items()}
 
-    def detail(self, level: str, area_id: str) -> dict:
-        """Everything the click panel shows for one area."""
+    def detail(self, level: str, area_id: str, extra: dict | None = None) -> dict:
+        """Everything the click panel shows for one area. `extra` is an unsaved risk
+        model to include, so the panel can show a data point while it is being edited."""
         if level not in COMPARE_WITH:
             raise KeyError(f"unknown level {level!r}")
+        models = list(self._saved.values()) + ([RiskModel.parse(extra, self.catalog)] if extra else [])
         a = self.area(level, area_id)
         comparisons = []
         for cl in COMPARE_WITH[level]:
@@ -187,12 +268,16 @@ class Atlas:
                 name = cid
             for source in ("synthetic", "published"):
                 vals = self._values(cl, cid, source)
+                if source == "synthetic":
+                    vals.update(self._datapoint_values(cl, cid, models))
                 if vals:
                     comparisons.append({"level": cl, "area_id": cid, "name": name, "source": source, "values": vals})
         values = self._values(level, area_id, "synthetic")
+        values.update(self._datapoint_values(level, area_id, models))
         published = self._values(level, area_id, "published") if level in ("block_group", "tract", "city") else {}
         return {"area": a, "source": "synthetic", "values": values, "published": published,
-                "comparisons": comparisons, "disclosure": DISCLOSURE}
+                "comparisons": comparisons, "datapoints": [{"id": m.id, "label": m.label} for m in models],
+                "disclosure": DISCLOSURE}
 
     # ------------------------------------------------------------------ search
 
@@ -222,6 +307,10 @@ class Atlas:
         stats = self._q(
             "SELECT area_id, variable || '.' || category AS col, estimate, se FROM stats "
             "WHERE level = ? AND source = 'synthetic'", [level]).fetchdf()
+        for m in self._saved.values():
+            f = self._datapoint_frame(m, level)
+            stats = pd.concat([stats, pd.DataFrame({"area_id": f["area_id"], "col": f"{m.id}.yes",
+                                                    "estimate": f["estimate"], "se": f["se"]})], ignore_index=True)
         stats = stats[stats["area_id"].isin(set(areas["area_id"]))]
         wide = stats.pivot_table(index="area_id", columns="col", values=["estimate", "se"], aggfunc="first")
         wide.columns = [c if m == "estimate" else f"{c}.se" for m, c in wide.columns]
@@ -241,3 +330,7 @@ class Atlas:
             body = {"type": "FeatureCollection", "disclosure": DISCLOSURE, "features": feats}
             return json.dumps(body).encode(), "application/geo+json"
         raise ValueError(f"unknown format {fmt!r}")
+
+
+def _compare(v: float, op: str, threshold: float) -> bool:
+    return {">": v > threshold, ">=": v >= threshold, "<": v < threshold, "<=": v <= threshold}[op]

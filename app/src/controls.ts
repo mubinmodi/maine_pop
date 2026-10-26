@@ -1,4 +1,4 @@
-import { search, type Filter, type Schema, type SearchHit } from "./api";
+import { search, type Filter, type RiskModel, type Schema, type SearchHit } from "./api";
 import { SCHEMES, type ConfidenceMode, type Scheme } from "./mapLayer";
 
 export type State = {
@@ -14,6 +14,9 @@ export type State = {
 
 type Handlers = {
   onChange: () => void;
+  onNewDatapoint: (preset: RiskModel | null) => void;
+  onEditDatapoint: (id: string) => void;
+  onDeleteDatapoint: (id: string) => void;
   onSearchPick: (hit: SearchHit) => void;
   onExport: (format: "csv" | "geojson") => void;
 };
@@ -23,6 +26,7 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 /** Builds every control from /api/schema, so a new catalog variable shows up here with no code change. */
 export function mountControls(el: HTMLElement, schema: Schema, state: State, h: Handlers) {
   const vars = schema.variables.filter((v) => v.available);
+  const dataPoints = vars.filter((v) => v.kind === "datapoint");
   const varOptions = (selected: string) =>
     vars.map((v) => `<option value="${v.id}" ${v.id === selected ? "selected" : ""}>${esc(v.label)}</option>`).join("");
   const catOptions = (variable: string, selected: string) =>
@@ -36,6 +40,17 @@ export function mountControls(el: HTMLElement, schema: Schema, state: State, h: 
       <input id="q" type="search" placeholder="e.g. 100 Congress St" autocomplete="off" />
       <ul id="hits" role="listbox"></ul>
     </section>
+    ${schema.datapoints.available ? `<section class="datapoints">
+      <h2>Data points</h2>
+      <p class="hint">Attach a measure like diabetes or Alzheimer's to every synthetic person with a risk model, and watch the map react as you change it.</p>
+      <ul class="dp-list">${dataPoints.map((v) => `<li>
+          <button class="link" data-show="${v.id}" title="Colour the map by this">${esc(v.label)}</button>
+          <span><button class="ghost tiny" data-edit="${v.id}">Edit</button><button class="ghost tiny" data-del="${v.id}" aria-label="Remove ${esc(v.label)}">×</button></span>
+        </li>`).join("") || `<li class="none">None saved yet</li>`}</ul>
+      <div class="row"><button id="dp-new">New data point</button></div>
+      <label>Or start from <select id="dp-preset"><option value="">a preset…</option>
+        ${schema.datapoints.presets.map((p) => `<option value="${p.id}">${esc(p.label)}</option>`).join("")}</select></label>
+    </section>` : ""}
     <section>
       <h2>Colour by</h2>
       <label>Variable <select id="var">${varOptions(state.variable)}</select></label>
@@ -85,7 +100,10 @@ export function mountControls(el: HTMLElement, schema: Schema, state: State, h: 
     </section>`;
 
   const $ = <T extends HTMLElement>(id: string) => el.querySelector<T>(`#${id}`)!;
+  // Stop the browser restoring old selections on reload: the state object is the truth.
+  el.querySelectorAll("input, select, textarea").forEach((x) => x.setAttribute("autocomplete", "off"));
   ($<HTMLSelectElement>("height")).value = state.height;
+  el.querySelectorAll<HTMLInputElement>('input[name="conf"]').forEach((r) => (r.checked = r.value === state.confidence));
 
   const syncMeasure = () => {
     const isTotal = vars.find((v) => v.id === state.variable)?.kind === "total";
@@ -171,6 +189,24 @@ export function mountControls(el: HTMLElement, schema: Schema, state: State, h: 
       });
     }, 200);
   };
+
+  // Data points
+  el.querySelector<HTMLButtonElement>("#dp-new")?.addEventListener("click", () => h.onNewDatapoint(null));
+  el.querySelector<HTMLSelectElement>("#dp-preset")?.addEventListener("change", (e) => {
+    const id = (e.target as HTMLSelectElement).value;
+    const p = schema.datapoints.presets.find((x) => x.id === id);
+    (e.target as HTMLSelectElement).value = "";
+    if (p) h.onNewDatapoint(p);
+  });
+  el.querySelectorAll<HTMLButtonElement>("button[data-show]").forEach((b) => (b.onclick = () => {
+    state.variable = b.dataset.show!; state.category = "yes"; state.measure = "share";
+    $<HTMLSelectElement>("var").value = state.variable;
+    $<HTMLSelectElement>("cat").innerHTML = catOptions(state.variable, state.category);
+    syncMeasure();
+    h.onChange();
+  }));
+  el.querySelectorAll<HTMLButtonElement>("button[data-edit]").forEach((b) => (b.onclick = () => h.onEditDatapoint(b.dataset.edit!)));
+  el.querySelectorAll<HTMLButtonElement>("button[data-del]").forEach((b) => (b.onclick = () => h.onDeleteDatapoint(b.dataset.del!)));
 
   $("csv").onclick = () => h.onExport("csv");
   $("geojson").onclick = () => h.onExport("geojson");

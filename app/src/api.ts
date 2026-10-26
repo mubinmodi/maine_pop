@@ -2,12 +2,22 @@
 
 export type Category = { id: string; label: string };
 export type Variable = {
-  id: string; label: string; kind: "total" | "seed" | "derived" | "attached";
+  id: string; label: string; kind: "total" | "seed" | "derived" | "attached" | "datapoint";
   unit: "person" | "household"; universe: string | null; available: boolean; categories: Category[];
+  model?: RiskModel;
 };
+// A data point: a risk model applied to every synthetic person (synthpop/datapoints.py).
+export type RiskModel = {
+  id: string; label: string; baseline: number;
+  odds_ratios: Record<string, Record<string, number>>;
+  universe: Record<string, string[]>;
+  description: string; source: string;
+};
+export type Factor = { id: string; label: string; categories: Category[] };
 export type Level = { id: string; label: string; min_zoom: number; max_zoom: number };
 export type Schema = {
   levels: Level[]; compare_with: Record<string, string[]>; variables: Variable[];
+  datapoints: { available: boolean; factors: Factor[]; presets: RiskModel[] };
   confidence: Record<string, string>; disclosure: string;
 };
 export type Confidence = "high" | "medium" | "low";
@@ -23,7 +33,10 @@ export type Detail = {
   area: { level: string; area_id: string; name: string; lon: number; lat: number; attrs: Record<string, unknown>; [k: string]: unknown };
   values: Values; published: Values; disclosure: string;
   comparisons: { level: string; area_id: string; name: string; source: "synthetic" | "published"; values: Values }[];
+  datapoints?: { id: string; label: string }[];
 };
+export type Breakdown = Record<string, { category: string; cases: number; rate: number; universe: number }[]>;
+export type Preview = LayerValues & { city: Stat; breakdown: Breakdown; model: RiskModel };
 export type SearchHit = { label: string; level: string; area_id: string; lon: number; lat: number; kind: string };
 
 async function json<T>(url: string): Promise<T> {
@@ -47,6 +60,26 @@ export const search = (q: string) => json<SearchHit[]>(`/api/search?${qs({ q })}
 
 export const exportUrl = (level: string, format: "csv" | "geojson", filters: Filter[]) =>
   `/api/export?${qs({ level, format, filters: filters.length ? JSON.stringify(filters) : undefined })}`;
+
+async function send<T>(method: "POST" | "DELETE", url: string, body?: unknown): Promise<T> {
+  const r = await fetch(url, {
+    method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    let msg = text;
+    try { msg = JSON.parse(text).detail ?? text; } catch { /* plain text */ }
+    throw new Error(msg);
+  }
+  return r.json() as Promise<T>;
+}
+
+export const previewDatapoint = (model: RiskModel, level: string, measure: string, filters: Filter[]) =>
+  send<Preview>("POST", "/api/datapoints/preview", { model, level, measure, filters });
+export const previewDetail = (level: string, area_id: string, model: RiskModel | null) =>
+  send<Detail>("POST", "/api/datapoints/detail", { level, area_id, model });
+export const saveDatapoint = (model: RiskModel) => send<RiskModel>("POST", "/api/datapoints", model);
+export const deleteDatapoint = (id: string) => send<{ deleted: string }>("DELETE", `/api/datapoints/${encodeURIComponent(id)}`);
 
 const geoCache = new Map<string, Promise<GeoJSON.FeatureCollection>>();
 export const getGeometry = (level: string) => {

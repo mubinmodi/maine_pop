@@ -51,6 +51,17 @@ Any host that runs a container works (Fly.io, Render, Cloud Run, a small VM). Pu
 | `app/` | deck.gl + MapLibre front end |
 | `docs/` | Architecture, design, validation report, ADRs |
 
+## Data points: health measures, live
+
+In the app's **Data points** section, start a new data point, or start from a preset such as Alzheimer's dementia from Dhana et al. 2023. A data point is a risk model:
+- a baseline prevalence for a reference person;
+- odds ratios by age, sex, race/ethnicity, education and living quarters;
+- the ages it counts.
+
+Every synthetic person gets a probability, and each area shows its expected cases and rate with margins. Moving any slider redraws the map and the rate-by-group charts within a fraction of a second.
+
+**Save as variable** writes the model to `config/datapoints.yaml`. It then works like any other variable (colour, filters, detail panel, export) with no rebuild. **×** removes it. The live maths uses per-run person counts that `synthpop publish` writes (`cells_draws.parquet`, `cells_reps.parquet`). The margins cover the synthetic population's uncertainty, not uncertainty in the odds ratios.
+
 ## Adding a variable
 
 Add an entry to [config/variables.yaml](config/variables.yaml):

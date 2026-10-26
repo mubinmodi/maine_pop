@@ -1,0 +1,3 @@
+# Saved data points (risk models) for the map. Edited by the app's Save button;
+# safe to edit by hand. See synthpop/datapoints.py for the model.
+datapoints: []

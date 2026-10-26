@@ -120,3 +120,35 @@ def publish(data: dict, capacity: pd.DataFrame, area: StudyArea, out_dir: str | 
     ], ignore_index=True)
     search.to_parquet(out / "search.parquet", index=False)
     return areas.groupby("level").size().to_dict()
+
+
+def risk_factors(catalog) -> list[str]:
+    """Person-level seed variables a data point's risk model can use."""
+    return [v.id for v in catalog.active if v.kind == "seed" and v.unit == "person"]
+
+
+def publish_cells(runs_dir: str | Path, catalog, out_dir: str | Path) -> dict[str, int]:
+    """Per-run person counts by risk-factor cell, for computing data points live.
+
+      cells_draws.parquet  main run (run 0) and placement draws, by parcel
+      cells_reps.parquet   replicate runs, by block group (enough for survey variance)
+    """
+    runs, out = Path(runs_dir), Path(out_dir)
+    factors = risk_factors(catalog)
+    draws = [runs / "main"] + sorted(runs.glob("draw_*"))
+    frames = []
+    for i, d in enumerate(draws):
+        p = pd.read_parquet(d / "persons.parquet", columns=["parcel_id", "block", "block_group"] + factors)
+        c = p.astype({f: str for f in factors}).groupby(["parcel_id", "block", "block_group"] + factors,
+                                                        observed=True).size().rename("n").reset_index()
+        frames.append(c.assign(run=i))
+    pd.concat(frames, ignore_index=True).to_parquet(out / "cells_draws.parquet", index=False)
+    reps = sorted(runs.glob("replicate_*"))
+    frames = []
+    for d in reps:
+        p = pd.read_parquet(d / "persons.parquet", columns=["block_group"] + factors)
+        c = p.astype({f: str for f in factors}).groupby(["block_group"] + factors, observed=True).size()
+        frames.append(c.rename("n").reset_index().assign(run=int(d.name.split("_")[1])))
+    if frames:
+        pd.concat(frames, ignore_index=True).to_parquet(out / "cells_reps.parquet", index=False)
+    return {"draws": len(draws), "replicates": len(reps)}

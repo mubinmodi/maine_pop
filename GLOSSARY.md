@@ -47,6 +47,10 @@ _Avoid_: Resolution, scale, tier
 The assignment of one synthetic household to one housing unit on one parcel.
 _Avoid_: Assignment, allocation
 
+**Data point**:
+A measure attached to synthetic persons by a risk model: a baseline prevalence for a reference person, multiplied (on the odds scale) by an odds ratio for each of the person's characteristics. Its value for an area is the expected number of cases.
+_Avoid_: Attached variable (the schema's older word for the same idea), indicator
+
 ### Runs
 
 **Run**:

@@ -117,12 +117,14 @@ def cmd_publish(args) -> None:
 
     import pandas as pd
 
-    from .publish import publish
+    from .publish import publish, publish_cells
 
     sources = _sources(args)
     cap = pd.read_parquet(Path(args.data) / "runs" / "main" / "capacity.parquet")
     counts = publish(sources.load_all(), cap, sources.area, Path(args.data) / "out")
     print("published areas:", ", ".join(f"{k} {v:,}" for k, v in counts.items()))
+    cells = publish_cells(Path(args.data) / "runs", sources.catalog, Path(args.data) / "out")
+    print(f"published risk-factor cells from {cells['draws']} draws and {cells['replicates']} replicates")
 
 
 def cmd_build(args) -> None:

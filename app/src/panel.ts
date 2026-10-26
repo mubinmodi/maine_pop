@@ -107,7 +107,26 @@ function comparisonTable(d: Detail, schema: Schema): string {
     <p class="hint">Shares with 90% margins. "ACS" columns are published Census estimates; county and state are not modelled.</p>`;
 }
 
-export function showDetail(el: HTMLElement, d: Detail, schema: Schema, onClose: () => void) {
+function dataPointRows(d: Detail): string {
+  const dps = d.datapoints ?? [];
+  if (!dps.length) return "";
+  const up = (id: string, level: string) => d.comparisons.find((c) => c.level === level && c.source === "synthetic")?.values[id]?.yes;
+  const rows = dps.map((dp) => {
+    const s = d.values[dp.id]?.yes;
+    const bg = up(dp.id, "block_group"), city = up(dp.id, "city");
+    return `<tr><th>${esc(dp.label)}</th>
+      <td class="this">${s ? `${num(s.estimate)}<span class="moe"> ±${num(Z * s.se)}</span>` : "0"}</td>
+      <td class="this">${s ? `${pct(s.share)}<span class="moe"> ±${pct(Z * s.share_se)}</span>` : "–"}</td>
+      <td>${bg ? pct(bg.share) : "–"}</td><td>${city ? pct(city.share) : "–"}</td></tr>`;
+  }).join("");
+  return `<h3>Data points</h3><div class="table-wrap"><table class="compare">
+    <thead><tr><th></th><th>Expected<br><span class="src">cases</span></th><th>Rate<br><span class="src">this area</span></th>
+    <th>Block group<br><span class="src">rate</span></th><th>Portland<br><span class="src">rate</span></th></tr></thead>
+    <tbody>${rows}</tbody></table></div>
+    <p class="hint">Risk-model estimates on the synthetic population. Margins don't include uncertainty in the model's odds ratios.</p>`;
+}
+
+export function showDetail(el: HTMLElement, d: Detail, schema: Schema, onClose: () => void, closeLabel?: string) {
   const a = d.area;
   const attrs = Object.entries(a.attrs ?? {})
     .filter(([, v]) => v !== null && v !== undefined)
@@ -128,11 +147,14 @@ export function showDetail(el: HTMLElement, d: Detail, schema: Schema, onClose: 
       ${countRow("People", people)}
       ${d.values.population && d.values.living_quarters?.group_quarters ? countRow("In group quarters", d.values.living_quarters.group_quarters) : ""}
     </div>
+    ${dataPointRows(d)}
     <p class="hint">Values are averages over 21 placements of the synthetic population, so a parcel can show 0.9 households. ± is the 90% margin.</p>
     ${people && people.estimate > 0 ? pyramid(d.values, schema) + shareBars("Race and ethnicity", "race_eth", d.values, schema)
       + shareBars("Educational attainment (25+)", "education", d.values, schema) : `<p class="empty">No synthetic residents placed here.</p>`}
     ${comparisonTable(d, schema)}
     <p class="disclosure-small">${esc(d.disclosure)}</p>`;
+  if (closeLabel) el.querySelector("header")!.insertAdjacentHTML("afterbegin", `<button class="ghost tiny back">← ${esc(closeLabel)}</button>`);
   el.hidden = false;
   el.querySelector<HTMLButtonElement>(".close")!.onclick = onClose;
+  el.querySelector<HTMLButtonElement>(".back")?.addEventListener("click", onClose);
 }

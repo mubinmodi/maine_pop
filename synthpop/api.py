@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -25,9 +25,10 @@ def _filters(raw: str | None) -> list[Filter]:
 
 
 def create_app(out_dir: str | Path = ROOT / "data" / "out", catalog_path: str | Path = ROOT / "config" / "variables.yaml",
-               app_dir: str | Path = ROOT / "app" / "dist") -> FastAPI:
+               app_dir: str | Path = ROOT / "app" / "dist",
+               datapoints_path: str | Path = ROOT / "config" / "datapoints.yaml") -> FastAPI:
     out = Path(out_dir)
-    atlas = Atlas.open(out, Catalog.load(catalog_path))
+    atlas = Atlas.open(out, Catalog.load(catalog_path), datapoints_path)
     api = FastAPI(title="Maine synthetic population", description=atlas.schema()["disclosure"])
     api.add_middleware(GZipMiddleware, minimum_size=2000)
 
@@ -51,6 +52,25 @@ def create_app(out_dir: str | Path = ROOT / "data" / "out", catalog_path: str | 
     @api.get("/api/areas/{level}/{area_id:path}")
     def detail(level: str, area_id: str):
         return guard(lambda: atlas.detail(level, area_id))
+
+    # Data points: live risk-model previews, and saving them as variables.
+    @api.post("/api/datapoints/preview")
+    def preview(body: dict = Body(...)):
+        return guard(lambda: atlas.preview(body["model"], body.get("level", "block_group"), body.get("measure", "share"),
+                                           [Filter.parse(f) for f in body.get("filters", [])]))
+
+    @api.post("/api/datapoints/detail")
+    def preview_detail(body: dict = Body(...)):
+        return guard(lambda: atlas.detail(body["level"], body["area_id"], body.get("model")))
+
+    @api.post("/api/datapoints")
+    def save_datapoint(body: dict = Body(...)):
+        return guard(lambda: atlas.save_datapoint(body))
+
+    @api.delete("/api/datapoints/{id}")
+    def delete_datapoint(id: str):
+        guard(lambda: atlas.delete_datapoint(id))
+        return {"deleted": id}
 
     @api.get("/api/search")
     def search(q: str = Query(..., min_length=1)):
