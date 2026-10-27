@@ -138,12 +138,12 @@ Two inputs are compared, both part of the shared contract: the validation run's 
 ```python
 model = RiskModel.parse({...}, catalog)      # baseline, odds_ratios, universe
 DataPointEngine(out_dir, catalog, city_id).compute(model, level)   # shared-contract columns
-DataPointStore("config/datapoints.yaml", catalog).save(model, taken)
+DataPointStore("config/datapoints.yaml" or "s3://bucket/key", catalog).save(model, taken)
 ```
 
 **Hides**
 - Turning odds ratios into a probability per risk-factor cell.
-- Summing expected cases from the per-run cell counts that `publish_cells` writes (21 placements and 80 replicates) with DuckDB.
+- Summing expected cases from the per-run cell counts that `publish_cells` writes (21 placements and 80 replicates). The counts are indexed by (run, area, cell) for every level at start-up, so a model is one weighted sum in NumPy: about 20 ms per level, 40 ms for 17,000 parcels.
 - The same estimate and margin rules as `summarize`.
 - Caching results per model and level.
 

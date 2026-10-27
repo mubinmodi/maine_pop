@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from synthpop import model
 from synthpop.api import create_app
 from synthpop.atlas import Atlas, Filter
-from synthpop.datapoints import PRESETS, DataPointEngine, RiskModel
+from synthpop.datapoints import PRESETS, DataPointEngine, DataPointStore, RiskModel
 from synthpop.model import Run
 from synthpop.publish import publish, publish_cells
 from synthpop.summarize import RunData, published, summarize
@@ -75,6 +75,30 @@ def test_expected_cases_match_a_brute_force_sum(built, catalog):
     assert engine.compute(m, "city")["estimate"].iloc[0] == pytest.approx(expected, rel=1e-9)
 
 
+def test_everyone_counts_including_people_with_a_blank_factor(built, catalog, tmp_path):
+    _, placed = built
+    runs, out = tmp_path / "blank_runs", tmp_path / "blank_out"
+    persons = []
+    for n in ("main", "draw_01", "draw_02"):
+        p = placed[n].persons.copy()
+        p.loc[p.index[::3], "education"] = None    # the real seed has no education under 25
+        (runs / n).mkdir(parents=True)
+        p.to_parquet(runs / n / "persons.parquet", index=False)
+        persons.append(p)
+    out.mkdir()
+    publish_cells(runs, catalog, out)
+    assert all(p["education"].isna().any() for p in persons)
+
+    engine = DataPointEngine(out, catalog, AREA.place_geoid)
+    flat = RiskModel.parse({"id": "flat", "baseline": 0.1, "odds_ratios": {"education": {"ba_plus": 0.5}}}, catalog)
+    people = np.mean([len(p) for p in persons])
+    ba = np.mean([(p["education"] == "ba_plus").sum() for p in persons])
+    halved = (0.5 / 9) / (1 + 0.5 / 9)                         # odds 1/9 times 0.5, as a probability
+    city = engine.compute(flat, "city").iloc[0]
+    assert city["estimate"] == pytest.approx(0.1 * (people - ba) + halved * ba, rel=1e-9)
+    assert sum(r["universe"] for r in engine.breakdown(flat)["sex"]) == pytest.approx(people)
+
+
 def test_cases_add_up_across_levels_and_universe_limits_shares(built, catalog):
     out, placed = built
     engine = DataPointEngine(out, catalog, AREA.place_geoid)
@@ -123,3 +147,38 @@ def test_api_routes(built, tmp_path):
     assert client.get("/api/layer", params={"level": "tract", "variable": "diabetes", "category": "yes"}).status_code == 200
     assert client.delete("/api/datapoints/diabetes").status_code == 200
     assert client.delete("/api/datapoints/diabetes").status_code == 404
+
+
+class FakeS3:
+    """Just the two S3 calls DataPointStore makes, backed by a dict."""
+
+    class NoSuchKey(Exception):
+        response = {"Error": {"Code": "NoSuchKey"}}
+
+    def __init__(self):
+        self.objects = {}
+
+    def get_object(self, Bucket, Key):
+        if (Bucket, Key) not in self.objects:
+            raise self.NoSuchKey()
+        body = self.objects[(Bucket, Key)]
+        return {"Body": type("Body", (), {"read": lambda self: body})()}
+
+    def put_object(self, Bucket, Key, Body, ContentType):
+        self.objects[(Bucket, Key)] = Body
+
+
+def test_store_saves_to_s3(catalog):
+    s3 = FakeS3()
+    store = DataPointStore("s3://bucket/app/datapoints.yaml", catalog, s3=s3)
+    assert store.models == {}                                # nothing saved yet is not an error
+    store.save(RiskModel.parse(DIABETES, catalog), taken=set())
+    assert b"diabetes" in s3.objects[("bucket", "app/datapoints.yaml")]
+
+    other = DataPointStore("s3://bucket/app/datapoints.yaml", catalog, s3=s3)   # another server copy
+    assert "diabetes" in other.models
+    other.save(RiskModel.parse({**DIABETES, "id": "obesity", "label": "Obesity"}, catalog), taken=set())
+    store.delete("diabetes")                                 # re-reads first, so obesity survives
+    assert list(DataPointStore("s3://bucket/app/datapoints.yaml", catalog, s3=s3).models) == ["obesity"]
+    with pytest.raises(ValueError, match="s3://bucket/key"):
+        DataPointStore("s3://bucket-only", catalog, s3=s3)

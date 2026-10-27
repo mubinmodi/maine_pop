@@ -82,3 +82,14 @@ def test_api_routes(out_dir, tmp_path):
     assert client.get("/geo/block_group.geojson").status_code == 200
     r = client.get("/api/export", params={"level": "block_group", "format": "csv"})
     assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
+
+
+def test_password_protects_everything_but_the_health_check(out_dir, tmp_path):
+    client = TestClient(create_app(out_dir, CATALOG_PATH, app_dir=tmp_path / "no-app", password="s3cret"))
+    assert client.get("/healthz").status_code == 200
+    r = client.get("/api/schema")
+    assert r.status_code == 401 and r.headers["www-authenticate"].startswith("Basic")
+    assert client.get("/api/schema", auth=("synthpop", "wrong")).status_code == 401
+    assert client.get("/api/schema", headers={"Authorization": "Basic not-base64!"}).status_code == 401
+    assert client.get("/api/schema", auth=("synthpop", "s3cret")).status_code == 200
+    assert client.get("/geo/block_group.geojson", auth=("synthpop", "s3cret")).status_code == 200

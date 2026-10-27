@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import time
 from pathlib import Path
 
@@ -139,7 +140,12 @@ def cmd_serve(args) -> None:
 
     from .api import create_app
 
-    uvicorn.run(create_app(Path(args.data) / "out", args.variables), host=args.host, port=args.port)
+    # Deployment settings come from the environment (see docs/deploy-aws.md).
+    app = create_app(Path(args.data) / "out", args.variables,
+                     datapoints_path=os.environ.get("SYNTHPOP_DATAPOINTS", ROOT / "config" / "datapoints.yaml"),
+                     password=os.environ.get("SYNTHPOP_PASSWORD") or None,
+                     user=os.environ.get("SYNTHPOP_USER", "synthpop"))
+    uvicorn.run(app, host=args.host, port=args.port)
 
 
 def main(argv=None) -> None:

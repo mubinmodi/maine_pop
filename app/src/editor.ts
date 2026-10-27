@@ -1,5 +1,5 @@
-// The data-point editor: a risk model with live sliders. Every change calls onChange
-// (debounced); the map and the result charts redraw from the preview it returns.
+// The data-point editor: a risk model with live sliders. Every change calls onChange;
+// the map and the result charts redraw from the preview it returns.
 import type { Preview, RiskModel, Schema } from "./api";
 
 const Z = 1.645;
@@ -99,12 +99,11 @@ export function openEditor(el: HTMLElement, schema: Schema, initial: RiskModel, 
   el.hidden = false;
 
   const $ = <T extends HTMLElement>(sel: string) => el.querySelector<T>(sel)!;
-  let timer = 0;
+  // No debounce: the caller keeps one preview in flight and sends the latest model when it lands.
   const changed = () => {
     $("#dp-state").textContent = "not saved";
     $("#dp-ref").textContent = `Reference person: ${referenceText()}.`;
-    clearTimeout(timer);
-    timer = window.setTimeout(() => h.onChange(JSON.parse(JSON.stringify(model))), 120);
+    h.onChange(JSON.parse(JSON.stringify(model)));
   };
 
   $<HTMLInputElement>("#dp-label").oninput = (e) => {

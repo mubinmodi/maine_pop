@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
+import secrets
 from pathlib import Path
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -24,13 +27,48 @@ def _filters(raw: str | None) -> list[Filter]:
         raise HTTPException(400, f"bad filters: {e}")
 
 
+def _json(body) -> Response:
+    """Map layers hold one entry per area (17,000 parcels); FastAPI's own encoder takes
+    ~40 ms on that, json.dumps a few."""
+    return Response(json.dumps(body, separators=(",", ":")), media_type="application/json")
+
+
+def _credentials(header: str) -> tuple[str, str] | None:
+    scheme, _, value = header.partition(" ")
+    if scheme.lower() != "basic":
+        return None
+    try:
+        user, sep, password = base64.b64decode(value, validate=True).decode().partition(":")
+    except (binascii.Error, UnicodeDecodeError):
+        return None
+    return (user, password) if sep else None
+
+
 def create_app(out_dir: str | Path = ROOT / "data" / "out", catalog_path: str | Path = ROOT / "config" / "variables.yaml",
                app_dir: str | Path = ROOT / "app" / "dist",
-               datapoints_path: str | Path = ROOT / "config" / "datapoints.yaml") -> FastAPI:
+               datapoints_path: str | Path = ROOT / "config" / "datapoints.yaml",
+               password: str | None = None, user: str = "synthpop") -> FastAPI:
+    """With `password`, every route except /healthz asks for HTTP basic auth."""
     out = Path(out_dir)
     atlas = Atlas.open(out, Catalog.load(catalog_path), datapoints_path)
     api = FastAPI(title="Maine synthetic population", description=atlas.schema()["disclosure"])
-    api.add_middleware(GZipMiddleware, minimum_size=2000)
+    # Level 4, not the default 9: a 731 kB parcel layer compresses in 8 ms instead of 73, about 8% larger.
+    api.add_middleware(GZipMiddleware, minimum_size=2000, compresslevel=4)
+
+    if password:
+        @api.middleware("http")
+        async def basic_auth(request: Request, call_next):
+            given = _credentials(request.headers.get("authorization", ""))
+            ok = given is not None and (secrets.compare_digest(given[0].encode(), user.encode())
+                                        & secrets.compare_digest(given[1].encode(), password.encode()))
+            if ok or request.url.path == "/healthz":
+                return await call_next(request)
+            return Response("Sign in required", 401, headers={"WWW-Authenticate": 'Basic realm="Portland synthetic population"'})
+
+    # For the load balancer's health check, so it stays open when a password is set.
+    @api.get("/healthz")
+    def healthz():
+        return {"ok": True}
 
     def guard(fn):
         try:
@@ -47,7 +85,7 @@ def create_app(out_dir: str | Path = ROOT / "data" / "out", catalog_path: str | 
     @api.get("/api/layer")
     def layer(level: str, variable: str, category: str = "total", measure: str = "estimate",
               filters: str | None = None):
-        return guard(lambda: atlas.layer(level, variable, category, measure, _filters(filters)))
+        return _json(guard(lambda: atlas.layer(level, variable, category, measure, _filters(filters))))
 
     @api.get("/api/areas/{level}/{area_id:path}")
     def detail(level: str, area_id: str):
@@ -56,8 +94,8 @@ def create_app(out_dir: str | Path = ROOT / "data" / "out", catalog_path: str | 
     # Data points: live risk-model previews, and saving them as variables.
     @api.post("/api/datapoints/preview")
     def preview(body: dict = Body(...)):
-        return guard(lambda: atlas.preview(body["model"], body.get("level", "block_group"), body.get("measure", "share"),
-                                           [Filter.parse(f) for f in body.get("filters", [])]))
+        return _json(guard(lambda: atlas.preview(body["model"], body.get("level", "block_group"), body.get("measure", "share"),
+                                                 [Filter.parse(f) for f in body.get("filters", [])])))
 
     @api.post("/api/datapoints/detail")
     def preview_detail(body: dict = Body(...)):

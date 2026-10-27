@@ -28,14 +28,19 @@ The build steps can also run one at a time: `synthpop run`, `summarize`, `valida
 
 ## Deploy
 
-The app is one process: FastAPI serves the API, the geometry files and the built front end, and reads only `data/out/` (about 30 MB for Portland). After building the data:
+The app is one process: FastAPI serves the API, the geometry files and the built front end, and reads only `data/out/` (about 35 MB for Portland). After building the data:
 
 ```bash
-docker build -t maine-synthpop .
-docker run -p 8000:8000 maine-synthpop
+docker build --platform linux/arm64 -t maine-synthpop .
+docker run -p 8000:8000 -e SYNTHPOP_PASSWORD=try-me maine-synthpop
 ```
 
-Any host that runs a container works (Fly.io, Render, Cloud Run, a small VM). Put it behind HTTPS. The API is read-only, so it can scale horizontally with no shared state. The Dockerfile has not been run yet, because Docker wasn't running on the build machine.
+Three environment variables configure a deployment:
+
+- `SYNTHPOP_PASSWORD` turns on basic auth (user `SYNTHPOP_USER`, default `synthpop`). `/healthz` stays open for load-balancer health checks.
+- `SYNTHPOP_DATAPOINTS` sets where saved data points live. Use `s3://bucket/key` in a container, or saves are lost on redeploy.
+
+[docs/deploy-aws.md](docs/deploy-aws.md) has step-by-step commands for AWS ECS Express Mode (Fargate on Graviton, HTTPS load balancer, S3, Secrets Manager), at about $80 a month (about $2.70 a day for a short demo). Any other container host works too. Keep one server copy while saved data points are in a single file.
 
 ## What's where
 

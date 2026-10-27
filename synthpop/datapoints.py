@@ -4,7 +4,7 @@ computed live and optionally saved.
     model = RiskModel.parse({...})
     engine = DataPointEngine(out_dir, catalog, city_id)
     frame = engine.compute(model, "block_group")   # area_id, estimate, se, share, share_se, confidence
-    store = DataPointStore("config/datapoints.yaml")
+    store = DataPointStore("config/datapoints.yaml", catalog)   # or "s3://bucket/key"
 
 A risk model gives every synthetic person a probability:
 
@@ -28,7 +28,6 @@ import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-import duckdb
 import numpy as np
 import pandas as pd
 import yaml
@@ -37,8 +36,6 @@ from .catalog import Catalog
 from .publish import risk_factors
 from .summarize import confidence
 
-LEVEL_EXPR = {"parcel": "parcel_id", "block": "block", "block_group": "block_group",
-              "tract": "substr(block_group, 1, 11)"}
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
 
 
@@ -123,75 +120,134 @@ def _dhana() -> dict:
 PRESETS = {"alzheimers_dhana": _dhana()}
 
 
+def _prefix(s: pd.Series, n: int) -> pd.Series:
+    """First n characters of each id, computed once per distinct id."""
+    s = s.astype("category")
+    return pd.Series(np.asarray(s.cat.categories.str[:n], dtype=object)[s.cat.codes], index=s.index)
+
+
+def _factorize(s: pd.Series) -> tuple[np.ndarray, pd.Index]:
+    """Codes for each row and the distinct values, sorted as text (a categorical's own order is arbitrary)."""
+    s = s.astype("category").cat.remove_unused_categories()
+    cats = np.asarray(s.cat.categories, dtype=object)
+    order = np.argsort(cats)
+    rank = np.empty(len(cats), dtype=np.int64)
+    rank[order] = np.arange(len(cats))
+    return rank[s.cat.codes.to_numpy()], pd.Index(cats[order], name="area_id")
+
+
 class DataPointEngine:
-    """Computes a risk model's expected cases for every area at a level, with margins."""
+    """Computes a risk model's expected cases for every area at a level, with margins.
+
+    Every synthetic person falls in one cell: a combination of the risk factors (a few
+    hundred occur). A model only sets each cell's probability, so at start-up the engine
+    counts people by (run, area, cell) for every level, and a model's expected cases are
+    those counts times the cell probabilities: one weighted sum, a few milliseconds.
+    """
 
     def __init__(self, out_dir: str | Path, catalog: Catalog, city_id: str):
         out = Path(out_dir)
         self.catalog = catalog
         self.city_id = city_id
         self.factors = risk_factors(catalog)
-        self.db = duckdb.connect()
         self.available = (out / "cells_draws.parquet").exists()
         self._cache: dict[tuple[str, str], pd.DataFrame] = {}
         self._lock = threading.Lock()
         if not self.available:
             return
-        self.db.execute(f"CREATE TABLE draws AS SELECT * FROM read_parquet('{out / 'cells_draws.parquet'}')")
-        reps = out / "cells_reps.parquet"
-        if reps.exists():
-            self.db.execute(f"CREATE TABLE reps AS SELECT * FROM read_parquet('{reps}')")
+        # Text columns load as categoricals: a million rows of strings would briefly take ~1 GB.
+        text = ["parcel_id", "block", "block_group", *self.factors]
+        draws = pd.read_parquet(out / "cells_draws.parquet", read_dictionary=text)
+        reps_path = out / "cells_reps.parquet"
+        reps = (pd.read_parquet(reps_path, read_dictionary=text[2:]) if reps_path.exists()
+                else draws.iloc[:0][["block_group", *self.factors, "n", "run"]])
+
+        # Cells, including a missing category (education is blank under 25).
+        codes_d, codes_r = self._cell_codes(draws), self._cell_codes(reps)
+        uniq = np.unique(np.concatenate([codes_d, codes_r]))
+        self.cells = self._decode(uniq)
+        cell_d, cell_r = np.searchsorted(uniq, codes_d), np.searchsorted(uniq, codes_r)
+
+        runs_d = np.sort(draws["run"].unique())
+        self.n_draws, self.n_reps = len(runs_d), reps["run"].nunique()
+        if 0 not in runs_d:
+            raise ValueError("cells_draws.parquet has no main run (run 0)")
+        self._main = int(np.searchsorted(runs_d, 0))
+        run_d = np.searchsorted(runs_d, draws["run"].to_numpy())
+        run_r = pd.factorize(reps["run"], sort=True)[0]
+        n_d, n_r = draws["n"].to_numpy(float), reps["n"].to_numpy(float)
+
+        ids = {"parcel": draws["parcel_id"], "block": draws["block"], "block_group": draws["block_group"],
+               "tract": _prefix(draws["block_group"], 11), "city": pd.Series(city_id, index=draws.index)}
+        rep_ids = {"block_group": reps["block_group"], "tract": _prefix(reps["block_group"], 11),
+                   "city": pd.Series(city_id, index=reps.index)}
+        self._levels: dict[str, dict] = {}
+        for level, s in ids.items():
+            area, areas = _factorize(s)
+            lv = {"areas": pd.Index(areas, name="area_id"),
+                  "draws": self._counts(run_d, area, cell_d, n_d, self.n_draws, len(areas))}
+            if level in rep_ids and self.n_reps:
+                r_area = areas.get_indexer(rep_ids[level])         # replicate areas outside the draws are dropped
+                keep = r_area >= 0
+                lv["reps"] = self._counts(run_r[keep], r_area[keep], cell_r[keep], n_r[keep], self.n_reps, len(areas))
+            self._levels[level] = lv
+        bg = self._levels["block_group"]["areas"]
+        self._levels["block"]["parent"] = bg.get_indexer(self._levels["block"]["areas"].str[:12])
+        parcel_bg = draws.drop_duplicates("parcel_id").set_index("parcel_id")["block_group"]
+        self._levels["parcel"]["parent"] = bg.get_indexer(parcel_bg.reindex(self._levels["parcel"]["areas"]))
+        self._cell_people = np.bincount(cell_d, weights=n_d, minlength=len(uniq)) / self.n_draws
+
+    def _cell_codes(self, df: pd.DataFrame) -> np.ndarray:
+        code = np.zeros(len(df), dtype=np.int64)
+        for f in self.factors:
+            cats = self.catalog.variable(f).category_ids
+            c = pd.Categorical(df[f], categories=cats).codes.astype(np.int64)
+            code = code * (len(cats) + 1) + np.where(c < 0, len(cats), c)
+        return code
+
+    def _decode(self, codes: np.ndarray) -> pd.DataFrame:
+        cols, rest = {}, codes.copy()
+        for f in reversed(self.factors):
+            cats = self.catalog.variable(f).category_ids
+            rest, c = np.divmod(rest, len(cats) + 1)
+            cols[f] = np.array([*cats, None], dtype=object)[c]
+        return pd.DataFrame({f: cols[f] for f in self.factors})
+
+    @staticmethod
+    def _counts(run, area, cell, n, n_runs, n_areas) -> dict:
+        """People by (run × area, cell), with duplicate rows summed."""
+        key = (run.astype(np.int64) * n_areas + area) * (cell.max(initial=0) + 1) + cell
+        uniq, inv = np.unique(key, return_inverse=True)
+        n_cells = cell.max(initial=0) + 1
+        return {"row": uniq // n_cells, "cell": uniq % n_cells, "n": np.bincount(inv, weights=n),
+                "shape": (n_runs, n_areas)}
+
+    @staticmethod
+    def _per_run(c: dict, p: np.ndarray, inside: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Expected cases, people in the universe, and the rate, for each run and area."""
+        size = c["shape"][0] * c["shape"][1]
+        cases = np.bincount(c["row"], weights=c["n"] * p[c["cell"]], minlength=size).reshape(c["shape"])
+        uni = np.bincount(c["row"], weights=c["n"] * inside[c["cell"]], minlength=size).reshape(c["shape"])
+        rate = np.divide(cases, uni, out=np.zeros_like(cases), where=uni > 0)
+        return cases, rate
+
+    def _level(self, level: str, p: np.ndarray, inside: np.ndarray) -> pd.DataFrame:
+        lv = self._levels[level]
+        cases, rate = self._per_run(lv["draws"], p, inside)
+        k = self.n_draws   # areas missing from a draw count as 0 in that draw
+        out = pd.DataFrame({
+            "estimate": cases.mean(0), "share": rate.mean(0),
+            "var_place": cases.var(0, ddof=1) if k > 1 else 0.0,
+            "var_place_s": rate.var(0, ddof=1) if k > 1 else 0.0,
+        }, index=lv["areas"])
+        if "reps" in lv:    # replicate (survey) variance at block group and above
+            r_cases, r_rate = self._per_run(lv["reps"], p, inside)
+            factor = 4 / self.n_reps
+            out["var_survey"] = factor * ((r_cases - cases[self._main]) ** 2).sum(0)
+            out["var_survey_s"] = factor * ((r_rate - rate[self._main]) ** 2).sum(0)
         else:
-            self.db.execute("CREATE TABLE reps AS SELECT * FROM draws WHERE false")
-        cols = ", ".join(self.factors)
-        self.cells = self.db.execute(f"SELECT DISTINCT {cols} FROM draws UNION SELECT DISTINCT {cols} FROM reps").fetchdf()
-        self.n_draws = self.db.execute("SELECT count(DISTINCT run) FROM draws").fetchone()[0]
-        self.n_reps = self.db.execute("SELECT count(DISTINCT run) FROM reps").fetchone()[0]
-
-    def _cursor(self, model: RiskModel):
-        cur = self.db.cursor()
-        cur.register("probs", model.probabilities(self.cells))
-        return cur
-
-    def _by_run(self, cur, table: str, area_expr: str) -> pd.DataFrame:
-        join = " AND ".join(f"t.{f} = probs.{f}" for f in self.factors)
-        return cur.execute(
-            f"SELECT run, {area_expr} AS area_id, SUM(n * p) AS cases, SUM(n * in_universe) AS uni "
-            f"FROM {table} t JOIN probs ON {join} GROUP BY run, area_id").fetchdf()
-
-    def _level(self, cur, level: str) -> pd.DataFrame:
-        expr = LEVEL_EXPR.get(level, f"'{self.city_id}'")
-        d = self._by_run(cur, "draws", expr)
-        d["rate"] = np.where(d["uni"] > 0, d["cases"] / d["uni"].replace(0, np.nan), 0.0)
-        k = self.n_draws
-        sums = d.assign(cases2=d["cases"] ** 2, rate2=d["rate"] ** 2).groupby("area_id")[["cases", "rate", "cases2", "rate2"]].sum()
-        out = pd.DataFrame({"estimate": sums["cases"] / k, "share": sums["rate"] / k})
-        if k > 1:   # areas missing from a draw count as 0 in that draw
-            out["var_place"] = ((sums["cases2"] / k - out["estimate"] ** 2) * k / (k - 1)).clip(lower=0)
-            out["var_place_s"] = ((sums["rate2"] / k - out["share"] ** 2) * k / (k - 1)).clip(lower=0)
-        else:
-            out["var_place"] = out["var_place_s"] = 0.0
-        base = d[d["run"] == 0].set_index("area_id")
-        out["base"] = base["cases"].reindex(out.index).fillna(0)
-        out["base_rate"] = base["rate"].reindex(out.index).fillna(0)
+            out["var_survey"] = out["var_survey_s"] = 0.0
         return out
-
-    def _survey(self, cur, level: str, base: pd.DataFrame) -> pd.DataFrame:
-        """Replicate (survey) variance at block group and above."""
-        if not self.n_reps:
-            return pd.DataFrame({"var_survey": 0.0, "var_survey_s": 0.0}, index=base.index)
-        expr = LEVEL_EXPR.get(level, f"'{self.city_id}'")
-        r = self._by_run(cur, "reps", expr)
-        r["rate"] = np.where(r["uni"] > 0, r["cases"] / r["uni"].replace(0, np.nan), 0.0)
-        runs = sorted(r["run"].unique())
-        cases = r.pivot_table(index="area_id", columns="run", values="cases", aggfunc="sum").reindex(columns=runs).fillna(0)
-        rate = r.pivot_table(index="area_id", columns="run", values="rate", aggfunc="sum").reindex(columns=runs).fillna(0)
-        cases, rate = cases.reindex(base.index).fillna(0), rate.reindex(base.index).fillna(0)
-        factor = 4 / len(runs)
-        return pd.DataFrame({
-            "var_survey": factor * cases.sub(base["base"], axis=0).pow(2).sum(axis=1),
-            "var_survey_s": factor * rate.sub(base["base_rate"], axis=0).pow(2).sum(axis=1),
-        }, index=base.index)
 
     def compute(self, model: RiskModel, level: str) -> pd.DataFrame:
         if not self.available:
@@ -200,18 +256,19 @@ class DataPointEngine:
         with self._lock:
             if key in self._cache:
                 return self._cache[key]
-        cur = self._cursor(model)
-        out = self._level(cur, level)
+        probs = model.probabilities(self.cells)
+        p, inside = probs["p"].to_numpy(), probs["in_universe"].to_numpy()
+        out = self._level(level, p, inside)
         if level in ("parcel", "block"):
-            bg = self._level(cur, "block_group")
-            bg = bg.join(self._survey(cur, "block_group", bg))
-            parent = self._parent_block_groups(cur, level, out.index)
-            bg_est = bg["estimate"].reindex(parent).to_numpy()
-            ratio = np.where(bg_est > 0, out["estimate"].to_numpy() / np.where(bg_est > 0, bg_est, 1), 0)
-            out["var_survey"] = ratio ** 2 * bg["var_survey"].reindex(parent).fillna(0).to_numpy()
-            out["var_survey_s"] = bg["var_survey_s"].reindex(parent).fillna(0).to_numpy()
-        else:
-            out = out.join(self._survey(cur, level, out))
+            # Below block group, attribute the block group's survey variance by share of its cases.
+            bg = self._level("block_group", p, inside)
+            parent = self._levels[level]["parent"]
+            ok = parent >= 0
+            take = lambda col: np.where(ok, bg[col].to_numpy()[np.where(ok, parent, 0)], 0.0)
+            bg_est = take("estimate")
+            ratio = np.divide(out["estimate"].to_numpy(), bg_est, out=np.zeros(len(out)), where=bg_est > 0)
+            out["var_survey"] = ratio ** 2 * take("var_survey")
+            out["var_survey_s"] = take("var_survey_s")
         out["se"] = np.sqrt(out["var_place"] + out["var_survey"])
         out["share_se"] = np.sqrt(out["var_place_s"] + out["var_survey_s"])
         out["confidence"] = confidence(out["estimate"], out["se"])
@@ -222,62 +279,92 @@ class DataPointEngine:
             self._cache[key] = frame
         return frame
 
-    def _parent_block_groups(self, cur, level: str, ids: pd.Index) -> list[str]:
-        if level == "block":
-            return [i[:12] for i in ids]
-        m = cur.execute("SELECT DISTINCT parcel_id, block_group FROM draws").fetchdf().set_index("parcel_id")["block_group"]
-        return m.reindex(ids).tolist()
-
     def breakdown(self, model: RiskModel) -> dict[str, list[dict]]:
         """City-wide expected cases and rate by each factor's categories: how the
         distribution responds to the model, for the editor's charts."""
-        cur = self._cursor(model)
+        probs = model.probabilities(self.cells)
+        people = self._cell_people
+        cases_by_cell, uni_by_cell = people * probs["p"].to_numpy(), people * probs["in_universe"].to_numpy()
         out = {}
-        join = " AND ".join(f"t.{f} = probs.{f}" for f in self.factors)
         for f in self.factors:
-            df = cur.execute(
-                f"SELECT t.{f} AS category, SUM(n * p) / {self.n_draws} AS cases, SUM(n * in_universe) / {self.n_draws} AS uni "
-                f"FROM draws t JOIN probs ON {join} GROUP BY t.{f}").fetchdf()
-            order = {c: i for i, c in enumerate(self.catalog.variable(f).category_ids)}
-            df = df[df["category"].isin(order)].assign(o=lambda x: x["category"].map(order)).sort_values("o")
-            out[f] = [{"category": r.category, "cases": round(float(r.cases), 2),
-                       "rate": round(float(r.cases / r.uni), 5) if r.uni > 0 else 0.0, "universe": round(float(r.uni), 1)}
-                      for r in df.itertuples()]
+            cats = self.catalog.variable(f).category_ids
+            code = pd.Categorical(self.cells[f], categories=cats).codes
+            ok = code >= 0
+            count = lambda w: np.bincount(code[ok], weights=w[ok], minlength=len(cats))
+            n, cases, uni = count(people), count(cases_by_cell), count(uni_by_cell)
+            out[f] = [{"category": c, "cases": round(float(cases[i]), 2),
+                       "rate": round(float(cases[i] / uni[i]), 5) if uni[i] > 0 else 0.0, "universe": round(float(uni[i]), 1)}
+                      for i, c in enumerate(cats) if n[i] > 0]
         return out
 
 
 class DataPointStore:
-    """Saved data points, in a YAML file next to variables.yaml."""
+    """Saved data points, in one YAML file: a local path (config/datapoints.yaml by default)
+    or an S3 object, `s3://bucket/key`, so a container keeps them across deploys."""
 
-    def __init__(self, path: str | Path, catalog: Catalog):
-        self.path = Path(path)
+    HEADER = ("# Saved data points (risk models) for the map. Edited by the app's Save button;\n"
+              "# safe to edit by hand. See synthpop/datapoints.py for the model.\n")
+
+    def __init__(self, path: str | Path, catalog: Catalog, s3=None):
+        self.location = str(path)
         self.catalog = catalog
         self._lock = threading.Lock()
-        raw = yaml.safe_load(self.path.read_text()) if self.path.exists() else None
-        self.models: dict[str, RiskModel] = {}
+        self._s3 = None
+        if self.location.startswith("s3://"):
+            self._bucket, _, self._key = self.location[len("s3://"):].partition("/")
+            if not self._bucket or not self._key:
+                raise ValueError(f"bad S3 location {self.location!r}: expected s3://bucket/key")
+            if s3 is None:
+                import boto3  # only needed for s3:// locations: install with the `aws` extra
+                s3 = boto3.client("s3")
+            self._s3 = s3
+        self.models = self._read()
+
+    def _read(self) -> dict[str, RiskModel]:
+        text = self._read_text()
+        raw = yaml.safe_load(text) if text else None
+        models = {}
         for item in (raw or {}).get("datapoints", []) or []:
-            m = RiskModel.parse(item, catalog)
-            self.models[m.id] = m
+            m = RiskModel.parse(item, self.catalog)
+            models[m.id] = m
+        return models
+
+    def _read_text(self) -> str | None:
+        if self._s3 is None:
+            path = Path(self.location)
+            return path.read_text() if path.exists() else None
+        try:
+            return self._s3.get_object(Bucket=self._bucket, Key=self._key)["Body"].read().decode()
+        except Exception as e:
+            if getattr(e, "response", {}).get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+                return None  # nothing saved yet
+            raise
 
     def _write(self) -> None:
-        header = ("# Saved data points (risk models) for the map. Edited by the app's Save button;\n"
-                  "# safe to edit by hand. See synthpop/datapoints.py for the model.\n")
         body = yaml.safe_dump({"datapoints": [m.to_dict() for m in self.models.values()]}, sort_keys=False,
                               allow_unicode=True)
-        tmp = self.path.with_suffix(".yaml.tmp")
-        tmp.write_text(header + body)
-        tmp.replace(self.path)
+        text = self.HEADER + body
+        if self._s3 is not None:
+            self._s3.put_object(Bucket=self._bucket, Key=self._key, Body=text.encode(), ContentType="application/yaml")
+            return
+        path = Path(self.location)
+        tmp = path.with_suffix(".yaml.tmp")
+        tmp.write_text(text)
+        tmp.replace(path)
 
+    # Each change re-reads the file first, so a save from another server copy isn't overwritten.
     def save(self, model: RiskModel, taken: set[str]) -> RiskModel:
         if model.id in taken:
             raise ValueError(f"{model.id!r} is already a variable name")
         with self._lock:
+            self.models = self._read()
             self.models[model.id] = model
             self._write()
         return model
 
     def delete(self, id: str) -> None:
         with self._lock:
+            self.models = self._read()
             if id not in self.models:
                 raise KeyError(f"no saved data point {id!r}")
             del self.models[id]

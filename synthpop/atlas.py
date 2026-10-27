@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import duckdb
+import numpy as np
 import pandas as pd
 
 from .catalog import Catalog
@@ -181,10 +182,13 @@ class Atlas:
         error = rows["share_se"] if measure == "share" else rows["se"]
         positive = value[value > 0]
         breaks = positive.quantile([0.2, 0.4, 0.6, 0.8]).round(6).tolist() if len(positive) else []
+        ids = rows["area_id"].tolist()
+        ok = [True] * len(ids) if passing is None else [a in passing for a in ids]
         return {
             "measure": measure, "source": "synthetic",
-            "values": {a: [round(float(v), 6), round(float(e), 6), c, (passing is None or a in passing)]
-                       for a, v, e, c in zip(rows["area_id"], value, error, rows["confidence"])},
+            "values": {a: [v, e, c, k] for a, v, e, c, k in zip(
+                ids, np.round(value.to_numpy(float), 6).tolist(), np.round(error.to_numpy(float), 6).tolist(),
+                rows["confidence"].tolist(), ok)},
             "fields": ["value", "se", "confidence", "passes_filters"],
             "breaks": breaks, "max": float(value.max()) if len(value) else 0.0,
             "filtered_count": None if passing is None else len(passing),

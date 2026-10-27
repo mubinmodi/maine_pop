@@ -66,7 +66,7 @@ async function start() {
     const measure = editing ? "share" : state.measure;     // a draft data point is shown as its rate
     const vsCity = state.scheme === "vs_city" && measure === "share";
     const colorReq = editing
-      ? previewDatapoint(editing.model, level, measure, state.filters).then((p) => { editing?.editor.showResult(p); return p; })
+      ? previewDatapoint(editing.model, level, measure, state.filters)
       : getLayer(level, state.variable, state.category, state.measure, state.filters);
     const [geometry, color, extrude, city] = await Promise.all([
       getGeometry(level),
@@ -79,6 +79,7 @@ async function start() {
       cityRate = p.city.share;
     } else cityRate = null;
     if (my !== seq) return;                       // a newer refresh started meanwhile
+    if (editing) editing.editor.showResult(color as Awaited<ReturnType<typeof previewDatapoint>>);
     current = { level, color };
     const scheme = vsCity ? "vs_city" : state.scheme === "vs_city" ? "green_blue" : state.scheme;
     const reference = city ? Object.values(city.values)[0]?.[0] ?? 0 : cityRate;
@@ -119,8 +120,19 @@ async function start() {
   const isSavedId = (id: string) => schema.variables.some((v) => v.kind === "datapoint" && v.id === id);
 
   function startEditing(model: RiskModel, saved: boolean) {
+    // While a slider moves, keep one preview in flight; when it lands, send the latest model.
+    let inFlight = false, again = false;
+    const preview = () => {
+      inFlight = true;
+      refresh().catch(() => {}).then(() => {
+        if (again) { again = false; preview(); } else inFlight = false;
+      });
+    };
     const editor = openEditor(panel, schema, model, saved, {
-      onChange: (m) => { if (editing) editing.model = m; refresh(); },
+      onChange: (m) => {
+        if (editing) editing.model = m;
+        if (inFlight) again = true; else preview();
+      },
       onSave: async (m) => {
         await saveDatapoint(m);
         schema = await getSchema();

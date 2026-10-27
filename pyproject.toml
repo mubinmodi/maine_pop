@@ -17,6 +17,10 @@ dependencies = [
     "uvicorn>=0.30",
 ]
 
+[project.optional-dependencies]
+# Saving data points to S3 (SYNTHPOP_DATAPOINTS=s3://...), used by the container image.
+aws = ["boto3>=1.35"]
+
 [dependency-groups]
 dev = ["pytest>=8", "httpx>=0.27"]
 
