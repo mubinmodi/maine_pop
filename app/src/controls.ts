@@ -35,6 +35,7 @@ export function mountControls(el: HTMLElement, schema: Schema, state: State, h: 
 
   el.innerHTML = `
     <h1>Portland, Maine<br><span>synthetic population</span></h1>
+    <p class="about"><a href="/">How to use this map</a></p>
     <section class="search">
       <label for="q">Search an address, block group or tract</label>
       <input id="q" type="search" placeholder="e.g. 100 Congress St" autocomplete="off" />

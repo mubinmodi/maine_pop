@@ -10,7 +10,22 @@ Browser ──HTTPS──▶ Load balancer (Express Mode) ──▶ Fargate task
                                                      └──◀ Secrets Manager: SYNTHPOP_PASSWORD
 ```
 
-These are the steps to run by hand, once. Commands are for `zsh` or `bash` with AWS CLI v2. Express Mode needs a recent CLI, so run `aws --version` and update it if `aws ecs create-express-gateway-service help` is missing.
+These are the steps to run by hand, once. Commands are for `zsh` or `bash` with AWS CLI v2. Keep the braces in `${ACCOUNT}:role`: in zsh, `$ACCOUNT:role` drops the `:r` and AWS answers "Role is not valid". Express Mode needs a recent CLI, so run `aws --version` and update it if `aws ecs create-express-gateway-service help` is missing.
+
+## Current deployment
+
+| | |
+|---|---|
+| URL | https://ma-5ce4446f22454607ad16ee51e42c72f0.ecs.us-east-2.on.aws |
+| Account and Region | 649852688863, us-east-2 (Ohio) |
+| Service | `maine-synthpop`, default cluster, 1 vCPU / 2 GB ARM64, one task, no password |
+| Image | `maine-synthpop:2e54efc-landing` in ECR (landing page at `/`, map at `/map/`) |
+| Saved data points | `s3://maine-synthpop-649852688863/datapoints.yaml` |
+| Deployed | 27 October 2026 |
+
+This account can run 4 vCPU of Fargate at once, and another service already uses 0.5. A rollout starts the new task before stopping the old one, so a 2 vCPU task can't be updated; 1 vCPU leaves room, and one request is just as fast.
+
+A new Express Mode address takes a few minutes to reach DNS. A computer that looked it up too early remembers "not found" for up to 15 minutes.
 
 ## Settings the container reads
 
@@ -32,7 +47,7 @@ Open http://localhost:8000, then sign in as `synthpop` with password `try-me`. U
 ## 1. Names used below
 
 ```bash
-export AWS_REGION=us-east-1
+export AWS_REGION=us-east-2   # this account's organization blocks ECS and EC2 everywhere else
 export ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 export NAME=maine-synthpop
 export BUCKET=$NAME-$ACCOUNT
@@ -127,9 +142,9 @@ EOF
 aws ecs create-express-gateway-service \
   --service-name $NAME \
   --primary-container file:///tmp/$NAME-container.json \
-  --execution-role-arn arn:aws:iam::$ACCOUNT:role/${NAME}-execution \
-  --infrastructure-role-arn arn:aws:iam::$ACCOUNT:role/${NAME}-infrastructure \
-  --task-role-arn arn:aws:iam::$ACCOUNT:role/${NAME}-task \
+  --execution-role-arn arn:aws:iam::${ACCOUNT}:role/${NAME}-execution \
+  --infrastructure-role-arn arn:aws:iam::${ACCOUNT}:role/${NAME}-infrastructure \
+  --task-role-arn arn:aws:iam::${ACCOUNT}:role/${NAME}-task \
   --cpu-architecture ARM64 \
   --cpu 2048 --memory 4096 \
   --health-check-path /healthz \
@@ -160,7 +175,7 @@ Some notes on these flags:
 - When the service is `ACTIVE`, its URL is `https://<service>.ecs.<region>.on.aws/`:
 
 ```bash
-export SERVICE_ARN=arn:aws:ecs:$AWS_REGION:$ACCOUNT:service/default/$NAME
+export SERVICE_ARN=arn:aws:ecs:${AWS_REGION}:${ACCOUNT}:service/default/$NAME
 aws ecs describe-express-gateway-service --service-arn $SERVICE_ARN \
   --query 'service.activeConfigurations[0].ingressPaths[].endpoint'
 ```

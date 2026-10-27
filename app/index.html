@@ -4,21 +4,62 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Portland Synthetic Population</title>
-  <link rel="stylesheet" href="/src/style.css" />
+  <meta name="description" content="A 3D map of Portland, Maine's synthetic population, with live risk models for health measures." />
+  <link rel="stylesheet" href="/src/landing.css" />
 </head>
 <body>
-  <div id="disclosure" role="note">
-    <strong>Synthetic estimates.</strong> <span id="disclosure-text">Every value is modelled from public data and describes likely distributions, not real residents.</span>
-  </div>
-  <div id="layout">
-    <aside id="controls" aria-label="Map controls"></aside>
-    <main id="map-wrap">
-      <div id="map"></div>
-      <div id="status" aria-live="polite"></div>
-      <div id="legend" aria-label="Legend"></div>
-    </main>
-    <aside id="panel" aria-label="Area detail" hidden></aside>
-  </div>
-  <script type="module" src="/src/main.ts"></script>
+  <main>
+    <header class="hero">
+      <p class="eyebrow">Portland, Maine</p>
+      <h1>Portland synthetic population</h1>
+      <p class="lede">A 3D map of about 68,700 synthetic people placed on Portland's 17,000 parcels, built from public Census and State of Maine data. You can attach a health measure, such as Alzheimer's, to every person and watch the map change as you adjust the model.</p>
+      <div class="actions">
+        <a class="button" href="/map/">Open the map</a>
+        <a class="button ghost" href="https://github.com/mubinmodi/maine_pop">Code and method on GitHub</a>
+      </div>
+      <div class="ramp" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    </header>
+
+    <section aria-labelledby="use">
+      <h2 id="use">How to use it</h2>
+      <ol class="steps">
+        <li>
+          <b>Zoom to change the level.</b>
+          <span class="levels">City → 20 tracts → 61 block groups → 811 blocks → 17,019 parcels</span>
+        </li>
+        <li>
+          <b>Click any area</b> to see its households and people: age and sex, race, education, and how it compares with the block group, county and state.
+        </li>
+        <li>
+          <b>Use the left panel</b> to colour the map by a variable, filter areas, search an address, or export CSV or GeoJSON.
+        </li>
+        <li>
+          <b>Try a data point.</b> Under <i>Data points</i>, pick the Alzheimer's preset or click <i>New data point</i>, then drag the sliders:
+          <ul>
+            <li><i>Who is counted</i> sets the ages and living situations included.</li>
+            <li><i>Baseline</i> is the rate for a reference person.</li>
+            <li><i>Odds ratios</i> raise or lower risk for each group; ×1 means no change.</li>
+          </ul>
+          The map updates as you drag. <i>Save as variable</i> keeps the model for everyone using the site.
+        </li>
+      </ol>
+    </section>
+
+    <section aria-labelledby="numbers">
+      <h2 id="numbers">Reading the numbers</h2>
+      <dl class="terms">
+        <dt>Expected cases</dt><dd>Each synthetic person's probability from the model, added up.</dd>
+        <dt>Rate</dt><dd>Expected cases divided by the people counted.</dd>
+        <dt>± margin</dt><dd>A 90% margin of error, as the Census uses. It covers uncertainty in the population, not in the model's odds ratios.</dd>
+        <dt>Confidence</dt><dd><span class="chip high">high</span> <span class="chip medium">medium</span> <span class="chip low">low</span> How big the margin is compared with the estimate.</dd>
+        <dt>Small areas</dt><dd>Parcel and block totals are fairly firm. Who lives there is a likely mix, so read it as a probability.</dd>
+      </dl>
+    </section>
+
+    <footer>
+      <p>Every value is a synthetic estimate of how people are likely distributed, not a record of real residents. Built from the ACS 2020–2024 (tables and PUMS microdata), the 2020 Census, and Maine parcel and E911 address data. The city total is 68,711 ± 506, against 68,854 in the ACS.</p>
+      <p><a href="https://github.com/mubinmodi/maine_pop">github.com/mubinmodi/maine_pop</a> has the method, the validation report and the code.</p>
+    </footer>
+  </main>
 </body>
 </html>

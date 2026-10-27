@@ -145,7 +145,8 @@ def cmd_serve(args) -> None:
                      datapoints_path=os.environ.get("SYNTHPOP_DATAPOINTS", ROOT / "config" / "datapoints.yaml"),
                      password=os.environ.get("SYNTHPOP_PASSWORD") or None,
                      user=os.environ.get("SYNTHPOP_USER", "synthpop"))
-    uvicorn.run(app, host=args.host, port=args.port)
+    # Behind a load balancer, trust its X-Forwarded-Proto so redirects stay on https.
+    uvicorn.run(app, host=args.host, port=args.port, proxy_headers=True, forwarded_allow_ips="*")
 
 
 def main(argv=None) -> None:

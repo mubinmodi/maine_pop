@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Portland Synthetic Population · Map</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="disclosure" role="note">
+    <strong>Synthetic estimates.</strong> <span id="disclosure-text">Every value is modelled from public data and describes likely distributions, not real residents.</span>
+  </div>
+  <div id="layout">
+    <aside id="controls" aria-label="Map controls"></aside>
+    <main id="map-wrap">
+      <div id="map"></div>
+      <div id="status" aria-live="polite"></div>
+      <div id="legend" aria-label="Legend"></div>
+    </main>
+    <aside id="panel" aria-label="Area detail" hidden></aside>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
