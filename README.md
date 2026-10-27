@@ -1,6 +1,6 @@
 # Maine synthetic population
 
-**Demo guide:** [how to use the map and the data-point sliders, and what the numbers mean](https://claude.ai/artifact/9SSRgA9MBvG7BqgxAqNtuf)
+**Live demo:** https://ma-5ce4446f22454607ad16ee51e42c72f0.ecs.us-east-2.on.aws (its front page explains how to use the map and read the numbers)
 
 A parcel-level synthetic population for Portland, Maine, built only from public Census and State of Maine data, with an interactive 3D map. Every value is a **synthetic estimate**, not a record of real people.
 
