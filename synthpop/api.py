@@ -110,6 +110,10 @@ def create_app(out_dir: str | Path = ROOT / "data" / "out", catalog_path: str | 
         guard(lambda: atlas.delete_datapoint(id))
         return {"deleted": id}
 
+    @api.get("/api/people")
+    def people():
+        return Response(guard(atlas.people), media_type="application/json")
+
     @api.get("/api/search")
     def search(q: str = Query(..., min_length=1)):
         return atlas.search(q)

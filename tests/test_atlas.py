@@ -8,7 +8,7 @@ from synthpop import model
 from synthpop.api import create_app
 from synthpop.atlas import Atlas, Filter
 from synthpop.model import Run
-from synthpop.publish import publish
+from synthpop.publish import publish, publish_people
 from synthpop.summarize import RunData, published, summarize
 from conftest import AREA, CATALOG_PATH
 
@@ -25,6 +25,9 @@ def out_dir(sources, catalog, tmp_path):
     out.mkdir()
     pd.concat([stats, published(data["acs"], catalog)]).to_parquet(out / "area_stats.parquet", index=False)
     publish(data, runs[0].capacity, AREA, out)
+    (tmp_path / "runs" / "main").mkdir(parents=True)
+    runs[0].persons.to_parquet(tmp_path / "runs" / "main" / "persons.parquet", index=False)
+    publish_people(tmp_path / "runs", data, catalog, AREA, out)
     return out
 
 
@@ -80,8 +83,25 @@ def test_api_routes(out_dir, tmp_path):
     bad = client.get("/api/layer", params={"level": "block", "variable": "population", "filters": "not json"})
     assert bad.status_code == 400
     assert client.get("/geo/block_group.geojson").status_code == 200
+    assert client.get("/api/people").json()["count"] > 0
     r = client.get("/api/export", params={"level": "block_group", "format": "csv"})
     assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
+
+
+def test_people_are_one_columnar_document_coded_by_schema_category(atlas, catalog):
+    body = json.loads(atlas.people())
+    n = body["count"]
+    assert n > 0 and all(len(body[k]) == n for k in ("lon", "lat", "age", "u", "household", "parcel", "block", "fallback"))
+    assert all(0 <= u < 1 for u in body["u"])
+    for a in body["attributes"]:
+        cats = catalog.variable(a).category_ids
+        assert len(body["codes"][a]) == n and all(-1 <= c < len(cats) for c in body["codes"][a])
+    sex = catalog.variable("sex").category_ids
+    p = pd.read_parquet(atlas.out / "people.parquet")
+    assert [sex[c] for c in body["codes"]["sex"]] == p["sex"].astype(str).tolist()
+    assert {body["parcels"][i] for i in body["parcel"]} <= set(p["parcel_id"])
+    assert [body["blocks"][i] for i in body["block"]] == p["block"].tolist()
+    assert sum(body["fallback"]) == int((p["location"] == "parcel").sum())
 
 
 def test_password_protects_everything_but_the_health_check(out_dir, tmp_path):

@@ -37,6 +37,20 @@ A run keeps only the catalog categories, so age is stored as 5-year groups. Ever
 
 This is one realisation. Placement differs between draws, so a person's parcel changes from `main` to `draw_01`. Area totals should come from the 21-draw means in `area_stats.parquet`, not from one person table.
 
+## People on the map
+
+`synthpop publish` also writes `data/out/people.parquet`: the same main-run persons and points, plus each person's catalog categories and a fixed uniform draw `u`. `/api/people` serves them as one columnar JSON document (about 0.8 MB gzipped). After that single download the app does everything in the browser:
+
+- **Data points apply automatically.** Every saved data point, and the one open in the editor, gives each person a case (1) or not (0): a person is a case when `u` is below their risk from the model. Because `u` is fixed, moving a slider only adds or removes cases at the margin; it never reshuffles who has the condition. People outside the model's universe (under 65 for dementia) are shown faint.
+- **Colour people by** any data point or attribute. People open coloured by the first saved data point.
+- **Show only people where** stacks filters on data points (case / not a case) or attributes. The legend counts the people shown.
+- People appear from block zoom (14) down. People sharing an address point stack upward 2.5 m apart, so apartment buildings read as columns. While people are shown, the area layer goes flat and faint.
+- While a saved data point is being edited, filters on it follow the draft; closing without saving puts them back.
+- **Clicking an area** (tract, block group, block or parcel) adds "Synthetic people here" to its detail panel: people, households, median age, share female, group-quarters residents and cases for each data point, counted from the dots. People outside the area fade. Clicking while zoomed out flies in to the area's people; "Show on map" does the same later. Clicking a dot opens its parcel.
+- **People table** toggles a table of the area's people with the same columns as the CSV (plus block, race and ethnicity, education and one column per data point: 1 case, 0 not, blank outside the universe). It shows up to 500 rows; **Download CSV** gives all of them.
+
+Case counts on the map are one realisation, so they differ from the area estimates (the expected number of cases, averaged over 21 placement draws) by chance. For dementia, 1,124 people are cases against 1,077 ± 171 expected.
+
 ## Adding race, poverty, employment and education
 
 The seed person carries all four already, because the whole person is copied. The choice is whether each attribute is also *calibrated*, meaning fitted to that block group's ACS table.

@@ -34,6 +34,7 @@ import yaml
 
 from .catalog import Catalog
 from .publish import risk_factors
+from .store import Document
 from .summarize import confidence
 
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
@@ -306,22 +307,13 @@ class DataPointStore:
               "# safe to edit by hand. See synthpop/datapoints.py for the model.\n")
 
     def __init__(self, path: str | Path, catalog: Catalog, s3=None):
-        self.location = str(path)
+        self.doc = Document(path, s3)
         self.catalog = catalog
         self._lock = threading.Lock()
-        self._s3 = None
-        if self.location.startswith("s3://"):
-            self._bucket, _, self._key = self.location[len("s3://"):].partition("/")
-            if not self._bucket or not self._key:
-                raise ValueError(f"bad S3 location {self.location!r}: expected s3://bucket/key")
-            if s3 is None:
-                import boto3  # only needed for s3:// locations: install with the `aws` extra
-                s3 = boto3.client("s3")
-            self._s3 = s3
         self.models = self._read()
 
     def _read(self) -> dict[str, RiskModel]:
-        text = self._read_text()
+        text = self.doc.read()
         raw = yaml.safe_load(text) if text else None
         models = {}
         for item in (raw or {}).get("datapoints", []) or []:
@@ -329,28 +321,10 @@ class DataPointStore:
             models[m.id] = m
         return models
 
-    def _read_text(self) -> str | None:
-        if self._s3 is None:
-            path = Path(self.location)
-            return path.read_text() if path.exists() else None
-        try:
-            return self._s3.get_object(Bucket=self._bucket, Key=self._key)["Body"].read().decode()
-        except Exception as e:
-            if getattr(e, "response", {}).get("Error", {}).get("Code") in ("NoSuchKey", "404"):
-                return None  # nothing saved yet
-            raise
-
     def _write(self) -> None:
         body = yaml.safe_dump({"datapoints": [m.to_dict() for m in self.models.values()]}, sort_keys=False,
                               allow_unicode=True)
-        text = self.HEADER + body
-        if self._s3 is not None:
-            self._s3.put_object(Bucket=self._bucket, Key=self._key, Body=text.encode(), ContentType="application/yaml")
-            return
-        path = Path(self.location)
-        tmp = path.with_suffix(".yaml.tmp")
-        tmp.write_text(text)
-        tmp.replace(path)
+        self.doc.write(self.HEADER + body)
 
     # Each change re-reads the file first, so a save from another server copy isn't overwritten.
     def save(self, model: RiskModel, taken: set[str]) -> RiskModel:

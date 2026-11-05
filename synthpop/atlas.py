@@ -74,6 +74,7 @@ class Atlas:
         self.out = out_dir
         self.engine = engine
         self.store = store
+        self._people: bytes | None = None
 
     @classmethod
     def open(cls, out_dir: str | Path, catalog: Catalog,
@@ -193,6 +194,36 @@ class Atlas:
             "breaks": breaks, "max": float(value.max()) if len(value) else 0.0,
             "filtered_count": None if passing is None else len(passing),
         }
+
+    # ------------------------------------------------------------------ people
+
+    def people(self) -> bytes:
+        """The main run's synthetic persons as one columnar JSON document, built once.
+        Each attribute is a list of codes into that variable's schema categories (-1 for
+        blank), so the app can colour, filter and apply risk models with no more requests."""
+        if self._people is None:
+            path = self.out / "people.parquet"
+            if not path.exists():
+                raise KeyError("no people published; run `synthpop publish`")
+            p = pd.read_parquet(path)
+            attrs = [v.id for v in self.catalog.active if v.id in p.columns]
+            codes = {}
+            for a in attrs:
+                index = {c: i for i, c in enumerate(self.catalog.variable(a).category_ids)}
+                codes[a] = p[a].astype(str).map(index).fillna(-1).astype(int).tolist()
+            parcels, parcel_code = np.unique(p["parcel_id"].to_numpy(dtype=str), return_inverse=True)
+            blocks, block_code = np.unique(p["block"].to_numpy(dtype=str), return_inverse=True)
+            body = {
+                "count": len(p), "lon": p["lon"].tolist(), "lat": p["lat"].tolist(),
+                "age": p["age"].fillna(-1).astype(int).tolist(), "u": p["u"].tolist(),
+                "household": p["household_id"].tolist(), "parcel": parcel_code.tolist(), "parcels": parcels.tolist(),
+                # Block ids start with their block group (12 digits) and tract (11), so one code covers every level.
+                "block": block_code.tolist(), "blocks": blocks.tolist(),
+                "fallback": (p["location"] == "parcel").astype(int).tolist(),
+                "attributes": attrs, "codes": codes,
+            }
+            self._people = json.dumps(body, separators=(",", ":")).encode()
+        return self._people
 
     # ------------------------------------------------------------------ data points
 

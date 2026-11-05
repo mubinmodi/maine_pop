@@ -70,6 +70,7 @@ export type RenderOptions = {
   scheme: Scheme;
   reference: number | null;      // Portland-wide value, for the vs_city scheme
   breaks: number[];              // class edges (differences from the reference for vs_city)
+  fade?: boolean;                // flat and faint, so the people layer reads on top
 };
 
 export function classOf(v: number, breaks: number[]): number {
@@ -100,7 +101,8 @@ export function renderLevel(
     pickable: true,
     stroked: true,
     filled: true,
-    extruded: opts.extruded && extrude !== null,
+    extruded: opts.extruded && extrude !== null && !opts.fade,
+    opacity: opts.fade ? 0.35 : 1,
     wireframe: false,
     lineWidthUnits: "pixels",
     getLineWidth: (f: GeoJSON.Feature) => ((f.properties as { id: string }).id === opts.selected ? 3 : level === "parcel" ? 0.4 : 1),

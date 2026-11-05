@@ -81,6 +81,14 @@ export const previewDetail = (level: string, area_id: string, model: RiskModel |
 export const saveDatapoint = (model: RiskModel) => send<RiskModel>("POST", "/api/datapoints", model);
 export const deleteDatapoint = (id: string) => send<{ deleted: string }>("DELETE", `/api/datapoints/${encodeURIComponent(id)}`);
 
+// The main run's synthetic persons, columnar: codes index each variable's schema categories (-1 blank).
+export type People = {
+  count: number; lon: number[]; lat: number[]; age: number[]; u: number[]; household: number[];
+  parcel: number[]; parcels: string[]; block: number[]; blocks: string[]; fallback: number[];
+  attributes: string[]; codes: Record<string, number[]>;
+};
+export const getPeople = () => json<People>("/api/people");
+
 const geoCache = new Map<string, Promise<GeoJSON.FeatureCollection>>();
 export const getGeometry = (level: string) => {
   if (!geoCache.has(level)) geoCache.set(level, json<GeoJSON.FeatureCollection>(`/geo/${level}.geojson`));

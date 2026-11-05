@@ -5,6 +5,7 @@
   areas.parquet         one row per area at every level: names, parent IDs, centroid, attributes (JSON)
   search.parquet        addresses and area names for search
   geo/<level>.geojson   simplified geometry with only `id`, fetched once per level by the app
+  people.parquet        the main run's persons with a map point each (publish_people)
   area_stats.parquet    written earlier by `synthpop summarize`
 """
 
@@ -125,6 +126,31 @@ def publish(data: dict, capacity: pd.DataFrame, area: StudyArea, out_dir: str | 
 def risk_factors(catalog) -> list[str]:
     """Person-level seed variables a data point's risk model can use."""
     return [v.id for v in catalog.active if v.kind == "seed" and v.unit == "person"]
+
+
+def publish_people(runs_dir: str | Path, data: dict, catalog, area: StudyArea, out_dir: str | Path) -> int:
+    """people.parquet: the main run's synthetic persons for the map's people layer, each
+    with an E911 address point, exact age, catalog categories and a fixed uniform draw `u`.
+    A data point marks a person a case when u < their risk, so changing a model only
+    adds or removes cases at the margin instead of reshuffling who has it."""
+    import numpy as np
+
+    from .persons import locate
+
+    persons = pd.read_parquet(Path(runs_dir) / "main" / "persons.parquet")
+    # Same stream as `synthpop persons`, so the map and the CSV agree.
+    where = locate(persons, data["e911"], data["parcels"], np.random.default_rng([area.random_seed, 2]))
+    cols = [v.id for v in catalog.active]
+    seed = data["pums_persons"][["SERIALNO", "SPORDER", "AGEP"]]
+    p = (persons[["person_id", "household_id", "parcel_id", "block", "seed_serial", "seed_person"] + cols]
+         .merge(where, on="person_id")
+         .merge(seed, left_on=["seed_serial", "seed_person"], right_on=["SERIALNO", "SPORDER"], how="left")
+         .drop(columns=["seed_serial", "seed_person", "SERIALNO", "SPORDER"])
+         .rename(columns={"AGEP": "age"})
+         .sort_values("person_id", ignore_index=True))
+    p["u"] = np.random.default_rng([area.random_seed, 3]).random(len(p)).round(4)
+    p.to_parquet(Path(out_dir) / "people.parquet", index=False)
+    return len(p)
 
 
 def publish_cells(runs_dir: str | Path, catalog, out_dir: str | Path) -> dict[str, int]:
