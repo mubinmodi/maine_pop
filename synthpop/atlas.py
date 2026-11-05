@@ -216,7 +216,9 @@ class Atlas:
             body = {
                 "count": len(p), "lon": p["lon"].tolist(), "lat": p["lat"].tolist(),
                 "age": p["age"].fillna(-1).astype(int).tolist(), "u": p["u"].tolist(),
-                "household": p["household_id"].tolist(), "parcel": parcel_code.tolist(), "parcels": parcels.tolist(),
+                "household": p["household_id"].tolist(),
+                "family": p["family_id"].fillna(-1).astype(int).tolist() if "family_id" in p else [-1] * len(p),
+                "parcel": parcel_code.tolist(), "parcels": parcels.tolist(),
                 # Block ids start with their block group (12 digits) and tract (11), so one code covers every level.
                 "block": block_code.tolist(), "blocks": blocks.tolist(),
                 "fallback": (p["location"] == "parcel").astype(int).tolist(),

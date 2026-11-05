@@ -11,6 +11,7 @@ import { levelForZoom, levelLabel, zoomForLevel } from "./levels";
 import { divergingBreaks, fmt, renderLegend, renderLevel } from "./mapLayer";
 import { showDetail } from "./panel";
 import { MIN_ZOOM, mountPeopleControls, mountPeopleHere, PeopleLayer, type PeopleState } from "./people";
+import { PersonTable } from "./personTable";
 
 // Zoom that frames an area's people when it is clicked.
 const PEOPLE_ZOOM: Record<string, number> = { tract: 14.5, block_group: 15, block: 16, parcel: 17.5 };
@@ -78,6 +79,13 @@ async function start() {
   let areaLayer: ReturnType<typeof renderLevel> | null = null;
   let areaFaded = false;
   const peopleOn = () => !!people && pstate.show && map.getZoom() >= MIN_ZOOM;
+  // The person table: clicking a row flies to that person and opens their parcel.
+  const personTable = new PersonTable(document.getElementById("person-table")!, (i) => {
+    if (!people) return;
+    pstate.show = true;
+    map.flyTo({ center: [people.p.lon[i], people.p.lat[i]], zoom: Math.max(map.getZoom(), 17.5), speed: 1.4 });
+    openDetail("parcel", people.p.parcels[people.p.parcel[i]]);
+  });
 
   function draw() {
     const fade = peopleOn();
@@ -89,13 +97,14 @@ async function start() {
     const pl = people?.layer(map.getZoom(), pstate, (parcel) => openDetail("parcel", parcel));
     overlay.setProps({ layers: [areaLayer, pl].filter(Boolean) });
     people?.legend(peopleLegend, pstate, map.getZoom());
+    personTable.refresh();
   }
 
   function mountPeople() {
     const controls = document.getElementById("controls")!;
     const after = controls.querySelector(".datapoints") ?? controls.querySelector(".search");
     after?.after(peopleSection);
-    mountPeopleControls(peopleSection, people, pstate, draw);
+    mountPeopleControls(peopleSection, people, pstate, draw, () => people && personTable.show(people, pstate));
   }
 
   /** Colour people by a data point and drop filters on ones that no longer exist. */

@@ -158,17 +158,19 @@ export class PeopleLayer {
     return out;
   }
 
-  /** Columns of the people table and CSV: the person table, plus every data point (1 case, 0 not, blank outside). */
-  private columns(): [string, (i: number) => string | number][] {
+  /** Columns of the people table and CSV: the person table, plus every data point (1 case, 0 not, blank outside).
+   * The first five are the person table proper: person, family, parcel, exact age and sex. */
+  columns(): [string, (i: number) => string | number][] {
     const p = this.p, dims = this.dims();
     const cat = (id: string) => { const d = dims.find((x) => x.id === id); return (i: number) => { const c = d ? d.code(i) : -1; return c >= 0 ? d!.cats[c].id : ""; }; };
     return [
       ["person_id", (i) => i],
-      ["household_id", (i) => (p.household[i] >= 0 ? p.household[i] : "")],
+      ["family_id", (i) => (p.family[i] >= 0 ? p.family[i] : "")],
       ["parcel_id", (i) => p.parcels[p.parcel[i]]],
-      ["block", (i) => p.blocks[p.block[i]]],
       ["AGE", (i) => p.age[i]],
       ["SEX", cat("sex")],
+      ["household_id", (i) => (p.household[i] >= 0 ? p.household[i] : "")],
+      ["block", (i) => p.blocks[p.block[i]]],
       ["race_eth", cat("race_eth")],
       ["education", cat("education")],
       ["lon", (i) => p.lon[i]],
@@ -196,6 +198,7 @@ export class PeopleLayer {
   summary(idx: number[]) {
     const p = this.p;
     const households = new Set(idx.map((i) => p.household[i]).filter((h) => h >= 0)).size;
+    const families = new Set(idx.map((i) => p.family[i]).filter((h) => h >= 0)).size;
     const ages = idx.map((i) => p.age[i]).filter((a) => a >= 0).sort((a, b) => a - b);
     const sex = this.dim("sex");
     const female = sex ? idx.filter((i) => sex.cats[sex.code(i)]?.id === "female").length : 0;
@@ -203,9 +206,12 @@ export class PeopleLayer {
       const inU = idx.filter((i) => d.code(i) !== 2).length;
       return { label: d.label, cases: idx.filter((i) => d.code(i) === 0).length, universe: inU };
     });
-    return { people: idx.length, households, medianAge: ages.length ? ages[Math.floor(ages.length / 2)] : null,
+    return { people: idx.length, households, families, medianAge: ages.length ? ages[Math.floor(ages.length / 2)] : null,
       female, groupQuarters: idx.filter((i) => p.household[i] < 0).length, dps };
   }
+
+  /** People passing every filter in the sidebar, in person_id order. */
+  visible(s: PeopleState): Uint32Array { return this.compute(s).idx; }
 
   /** Index into the full people arrays of a picked dot. */
   person(pickedIndex: number) { return this.view ? this.view.idx[pickedIndex] : -1; }
@@ -222,7 +228,8 @@ export class PeopleLayer {
       show("race_eth"), show("education") && `Education: ${show("education")}`,
       this.p.household[i] < 0 ? "Group quarters" : `Household of ${show("household_size") ?? "?"} · ${(show("tenure") ?? "").toLowerCase()}`,
       ...dims.filter((d) => d.kind === "datapoint").map((d) => `${d.label}: <b>${d.cats[d.code(i)].label.toLowerCase()}</b>`),
-      `<i>parcel ${this.p.parcels[this.p.parcel[i]]} · one realisation (main run)</i>`,
+      `Person ${i} · ${this.p.family[i] >= 0 ? `family ${this.p.family[i]}` : "not in a family"} · parcel ${this.p.parcels[this.p.parcel[i]]}`,
+      `<i>one realisation (main run)</i>`,
     ];
     return lines.filter(Boolean).join("<br>");
   }
@@ -284,6 +291,7 @@ export function mountPeopleHere(el: HTMLElement, layer: PeopleLayer, f: Focus, o
     ${s.people ? `<div class="counts">
       <div class="count"><span>People</span><b>${s.people.toLocaleString()}</b></div>
       <div class="count"><span>Households</span><b>${s.households.toLocaleString()}</b></div>
+      <div class="count"><span>Families</span><b>${s.families.toLocaleString()}</b></div>
       <div class="count"><span>Median age</span><b>${s.medianAge ?? "–"}</b></div>
       <div class="count"><span>Female</span><b>${pct(s.female, s.people)}</b></div>
       ${s.groupQuarters ? `<div class="count"><span>In group quarters</span><b>${s.groupQuarters.toLocaleString()}</b></div>` : ""}
@@ -313,7 +321,7 @@ export function mountPeopleHere(el: HTMLElement, layer: PeopleLayer, f: Focus, o
 }
 
 /** The People section of the sidebar. Rebuilt whenever data points change. */
-export function mountPeopleControls(el: HTMLElement, layer: PeopleLayer | null, s: PeopleState, onChange: () => void) {
+export function mountPeopleControls(el: HTMLElement, layer: PeopleLayer | null, s: PeopleState, onChange: () => void, onTable?: () => void) {
   if (!layer) { el.innerHTML = `<h2>People</h2><p class="hint">Loading synthetic people…</p>`; return; }
   const dims = layer.dims();
   const dps = dims.filter((d) => d.kind === "datapoint");
@@ -332,6 +340,7 @@ export function mountPeopleControls(el: HTMLElement, layer: PeopleLayer | null, 
     <h2>People</h2>
     <label class="check"><input id="pp-show" type="checkbox" ${s.show ? "checked" : ""}> Show synthetic people</label>
     <p class="hint">${layer.p.count.toLocaleString()} people from one run, on their E911 address points. Zoom in to blocks to see them; apartment buildings stack upward.</p>
+    <button id="pp-table" class="ghost">Person table (one run)</button>
     <label>Colour people by <select id="pp-color">${colourOpts(s.colorBy)}</select></label>
     ${dps.length ? "" : `<p class="hint">Add a data point above and every person gets it as case / not a case.</p>`}
     <label>Show only people where <select id="pp-fdim">${filterOpts(firstFilter)}</select></label>
@@ -350,6 +359,7 @@ export function mountPeopleControls(el: HTMLElement, layer: PeopleLayer | null, 
       (b.onclick = () => { s.filters.splice(+b.dataset.i!, 1); renderFilters(); onChange(); }));
   };
   renderFilters();
+  $<HTMLButtonElement>("pp-table").onclick = () => onTable?.();
   $<HTMLInputElement>("pp-show").onchange = (e) => { s.show = (e.target as HTMLInputElement).checked; onChange(); };
   $<HTMLSelectElement>("pp-color").onchange = (e) => { s.colorBy = (e.target as HTMLSelectElement).value; onChange(); };
   $<HTMLSelectElement>("pp-fdim").onchange = (e) => { $("pp-fcat").innerHTML = catOpts((e.target as HTMLSelectElement).value); };

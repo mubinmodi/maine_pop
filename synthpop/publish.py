@@ -135,14 +135,15 @@ def publish_people(runs_dir: str | Path, data: dict, catalog, area: StudyArea, o
     adds or removes cases at the margin instead of reshuffling who has it."""
     import numpy as np
 
-    from .persons import locate
+    from .persons import family_ids, locate
 
     persons = pd.read_parquet(Path(runs_dir) / "main" / "persons.parquet")
+    persons["family_id"] = family_ids(persons, data["pums_persons"])
     # Same stream as `synthpop persons`, so the map and the CSV agree.
     where = locate(persons, data["e911"], data["parcels"], np.random.default_rng([area.random_seed, 2]))
     cols = [v.id for v in catalog.active]
     seed = data["pums_persons"][["SERIALNO", "SPORDER", "AGEP"]]
-    p = (persons[["person_id", "household_id", "parcel_id", "block", "seed_serial", "seed_person"] + cols]
+    p = (persons[["person_id", "family_id", "household_id", "parcel_id", "block", "seed_serial", "seed_person"] + cols]
          .merge(where, on="person_id")
          .merge(seed, left_on=["seed_serial", "seed_person"], right_on=["SERIALNO", "SPORDER"], how="left")
          .drop(columns=["seed_serial", "seed_person", "SERIALNO", "SPORDER"])

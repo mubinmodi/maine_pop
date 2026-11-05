@@ -83,7 +83,7 @@ export const deleteDatapoint = (id: string) => send<{ deleted: string }>("DELETE
 
 // The main run's synthetic persons, columnar: codes index each variable's schema categories (-1 blank).
 export type People = {
-  count: number; lon: number[]; lat: number[]; age: number[]; u: number[]; household: number[];
+  count: number; lon: number[]; lat: number[]; age: number[]; u: number[]; household: number[]; family: number[];
   parcel: number[]; parcels: string[]; block: number[]; blocks: string[]; fallback: number[];
   attributes: string[]; codes: Record<string, number[]>;
 };

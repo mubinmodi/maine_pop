@@ -8,7 +8,7 @@ from synthpop.model.fit import fit_weights, integerize
 from shapely.geometry import Point
 
 from synthpop.model.place import assign_points
-from synthpop.persons import locate, person_table
+from synthpop.persons import family_ids, locate, person_table
 from conftest import AREA
 
 
@@ -56,12 +56,27 @@ def test_people_match_their_households(inputs):
 def test_person_table_copies_exact_age_and_sex_from_the_seed(inputs, sources):
     placed = model.run(inputs, Run.main())
     table = person_table(placed.persons, sources.load("pums_persons"))
-    assert list(table.columns) == ["person_id", "household_id", "parcel_id", "AGE", "SEX"]
+    assert list(table.columns) == ["person_id", "family_id", "parcel_id", "AGE", "SEX", "household_id"]
     assert len(table) == len(placed.persons) and table["AGE"].notna().all()
     p = placed.persons.set_index("person_id").loc[table["person_id"]]
     assert (table["SEX"].to_numpy() == p["sex"].astype(str).to_numpy()).all()
     assert ((table["AGE"] >= 65).to_numpy() == (p["age65_plus"].astype(str) == "yes").to_numpy()).all()
     assert table.loc[p["household_id"].to_numpy() < 0, "household_id"].isna().all()
+
+
+def test_family_is_the_householder_and_their_relatives():
+    seed = pd.DataFrame({
+        "SERIALNO": ["A", "A", "A", "B", "C", "C", "D", "D", "E"],
+        "SPORDER": [1, 2, 3, 1, 1, 2, 1, 2, 1],
+        # A: householder, spouse, roommate. B: alone. C: unmarried partners. D: parent and child. E: group quarters.
+        "RELSHIPP": [20, 21, 34, 20, 20, 22, 20, 25, 37],
+    })
+    persons = pd.DataFrame({
+        "person_id": range(9), "household_id": [0, 0, 0, 1, 2, 2, 3, 3, -1], "parcel_id": "P",
+        "seed_serial": seed["SERIALNO"], "seed_person": seed["SPORDER"],
+    })
+    got = family_ids(persons, seed)
+    assert got.fillna(-1).tolist() == [0, 0, -1, -1, -1, -1, 3, 3, -1]
 
 
 def test_every_person_gets_a_point_on_their_parcel_shared_by_their_household(inputs, sources):

@@ -10,14 +10,17 @@ uv run synthpop persons --run draw_07   # any other placement draw
 | Column | Meaning |
 |---|---|
 | `person_id` | Synthetic person, unique within the run |
-| `household_id` | Synthetic household the person belongs to. Empty for the 1,959 group-quarters residents (dorms, nursing homes, shelters), who live in no household |
+| `family_id` | Census family the person belongs to: the householder and their relatives by birth, marriage or adoption. Empty for people outside a family (see below). Equal to the family's `household_id` |
 | `parcel_id` | Maine parcel ID the person is placed on |
 | `AGE` | Exact age in years, from the seed person's `AGEP` |
 | `SEX` | `male` or `female`, from the seed person's `SEX` |
+| `household_id` | Synthetic household the person belongs to. Empty for the 1,959 group-quarters residents (dorms, nursing homes, shelters), who live in no household |
 | `lon`, `lat` | Point to plot the person at (WGS 84) |
 | `location` | `address` when the point is an E911 address point, `parcel` when it is a random point inside the parcel |
 
-The main run gives 68,769 persons in 33,287 households; 99.5% sit on an E911 address point.
+The main run gives 68,769 persons in 33,287 households and 14,771 families; 99.5% sit on an E911 address point.
+
+In the app, **People → Person table (one run)** opens the same table over the bottom of the map: all 68,769 rows, 100 a page, following the sidebar's people filters. Search finds a person, family or household by number, or a parcel by ID. **Download CSV** saves the matching rows, and clicking a row flies to that person and opens their parcel.
 
 ## Points
 
@@ -29,7 +32,14 @@ The main run gives 68,769 persons in 33,287 households; 99.5% sit on an E911 add
 - The 31 parcels with no address point (331 persons) get a uniform random point inside the parcel boundary.
 - The draw uses its own random stream from the study area's `random_seed`, so the same run always gives the same points.
 
-`household_id` is the Census household (everyone sharing one housing unit), not the Census family (people related by birth, marriage or adoption). A household of roommates has one `household_id` but is not a family.
+## Households and families
+
+`household_id` is the Census household: everyone sharing one housing unit. `family_id` is the Census family: the householder plus everyone in the household related to them by birth, marriage or adoption, read from the seed person's `RELSHIPP`:
+
+- In the family: householder (20), spouse (21, 23), biological, adopted or stepchild (25–27), sibling (28), parent (29), grandchild (30), parent-in-law or child-in-law (31, 32), other relative (33).
+- Not in the family: unmarried partner (22, 24), roommate (34), foster child (35), other nonrelative (36), and group-quarters residents.
+
+A household with no relative of the householder (someone living alone, roommates, an unmarried couple with no children) holds no family, so all its members have an empty `family_id`. Every synthetic household copies one seed household whole, so relationships stay intact and the family is named by its household. 40,962 of the 68,769 people are in a family.
 
 ## How exact age gets in
 

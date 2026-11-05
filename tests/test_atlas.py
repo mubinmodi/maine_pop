@@ -91,7 +91,7 @@ def test_api_routes(out_dir, tmp_path):
 def test_people_are_one_columnar_document_coded_by_schema_category(atlas, catalog):
     body = json.loads(atlas.people())
     n = body["count"]
-    assert n > 0 and all(len(body[k]) == n for k in ("lon", "lat", "age", "u", "household", "parcel", "block", "fallback"))
+    assert n > 0 and all(len(body[k]) == n for k in ("lon", "lat", "age", "u", "household", "family", "parcel", "block", "fallback"))
     assert all(0 <= u < 1 for u in body["u"])
     for a in body["attributes"]:
         cats = catalog.variable(a).category_ids

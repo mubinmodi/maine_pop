@@ -72,7 +72,8 @@ def cmd_persons(args) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(out, index=False)
     on_address = (table["location"] == "address").mean()
-    print(f"{out}: {len(table):,} persons in {table['household_id'].nunique():,} households, "
+    print(f"{out}: {len(table):,} persons in {table['household_id'].nunique():,} households "
+          f"and {table['family_id'].nunique():,} families, "
           f"{on_address:.1%} on an E911 address point")
 
 
