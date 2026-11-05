@@ -222,7 +222,10 @@ def run(inputs: Inputs, spec: Run) -> Placed:
     gq["block"] = parcel_info.loc[gq["parcel_id"], "block"].to_numpy() if len(gq) else []
 
     person_cols = [v.id for v in inputs.catalog.active]
-    m = inputs.members[["unit"] + person_cols]
+    # seed_serial + seed_person name the PUMS person each synthetic person copies,
+    # so any PUMS column (exact age, poverty, ...) can be joined back later.
+    m = inputs.members[["unit", "SERIALNO", "SPORDER"] + person_cols].rename(
+        columns={"SERIALNO": "seed_serial", "SPORDER": "seed_person"})
     hp = hh[["household_id", "unit", "parcel_id", "block", "block_group"]].merge(m, on="unit")
     gp = gq[["copy_id", "unit", "parcel_id", "block", "block_group"]].merge(m, on="unit").drop(columns="copy_id")
     gp["household_id"] = -1

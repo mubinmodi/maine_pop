@@ -50,9 +50,8 @@ def parcel_base(parcels: gpd.GeoDataFrame, e911: gpd.GeoDataFrame, blocks: gpd.G
     pt = pt[pt["parcel_id"].notna()]
 
     ptype = pt["place_type"].fillna("").str.strip()
-    unit = pt["unit"].fillna("").str.strip()
-    pt["residential"] = ~ptype.isin(NON_RESIDENTIAL) & ~unit.str.upper().str.startswith("STE")
-    pt["has_unit"] = unit != ""
+    pt["residential"] = is_residential(pt)
+    pt["has_unit"] = pt["unit"].fillna("").str.strip() != ""
     pt["gq_site"] = ptype.isin(GROUP_QUARTERS_TYPES)
     res = pt[pt["residential"]]
     agg = res.groupby("parcel_id").agg(points=("residential", "size"), unit_points=("has_unit", "sum"))
@@ -61,6 +60,13 @@ def parcel_base(parcels: gpd.GeoDataFrame, e911: gpd.GeoDataFrame, blocks: gpd.G
     base["raw_units"] = base["raw_units"].fillna(0).astype(int)
     base["gq_site"] = base["parcel_id"].isin(set(pt.loc[pt["gq_site"], "parcel_id"]))
     return base.reset_index(drop=True)
+
+
+def is_residential(e911: pd.DataFrame) -> pd.Series:
+    """Address points that can hold a home: not a business type, and not a suite."""
+    ptype = e911["place_type"].fillna("").str.strip()
+    unit = e911["unit"].fillna("").str.strip()
+    return ~ptype.isin(NON_RESIDENTIAL) & ~unit.str.upper().str.startswith("STE")
 
 
 def assign_points(e911: gpd.GeoDataFrame, parcels: gpd.GeoDataFrame, parcel_ids: set[str]) -> pd.Series:

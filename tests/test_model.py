@@ -5,6 +5,10 @@ import pytest
 from synthpop import model
 from synthpop.model import Run
 from synthpop.model.fit import fit_weights, integerize
+from shapely.geometry import Point
+
+from synthpop.model.place import assign_points
+from synthpop.persons import locate, person_table
 from conftest import AREA
 
 
@@ -47,6 +51,35 @@ def test_people_match_their_households(inputs):
     # every person sits on the same parcel as their household
     merged = in_hh.merge(placed.households[["household_id", "parcel_id"]], on="household_id", suffixes=("", "_hh"))
     assert (merged["parcel_id"] == merged["parcel_id_hh"]).all()
+
+
+def test_person_table_copies_exact_age_and_sex_from_the_seed(inputs, sources):
+    placed = model.run(inputs, Run.main())
+    table = person_table(placed.persons, sources.load("pums_persons"))
+    assert list(table.columns) == ["person_id", "household_id", "parcel_id", "AGE", "SEX"]
+    assert len(table) == len(placed.persons) and table["AGE"].notna().all()
+    p = placed.persons.set_index("person_id").loc[table["person_id"]]
+    assert (table["SEX"].to_numpy() == p["sex"].astype(str).to_numpy()).all()
+    assert ((table["AGE"] >= 65).to_numpy() == (p["age65_plus"].astype(str) == "yes").to_numpy()).all()
+    assert table.loc[p["household_id"].to_numpy() < 0, "household_id"].isna().all()
+
+
+def test_every_person_gets_a_point_on_their_parcel_shared_by_their_household(inputs, sources):
+    placed = model.run(inputs, Run.main())
+    e911, parcels = sources.load("e911"), sources.load("parcels")
+    where = locate(placed.persons, e911, parcels, np.random.default_rng(0))
+    p = placed.persons.merge(where, on="person_id")
+    assert len(p) == len(placed.persons) and p[["lon", "lat"]].notna().all().all()
+    in_hh = p[p["household_id"] >= 0]
+    assert (in_hh.groupby("household_id")[["lon", "lat"]].nunique() == 1).all().all()
+    # an address point belongs to the person's parcel; a fallback point lies inside it
+    pts = e911.assign(parcel_id=assign_points(e911, parcels, set(p["parcel_id"])))
+    key = pts.geometry.x.round(6).astype(str) + "," + pts.geometry.y.round(6).astype(str) + "," + pts["parcel_id"].astype(str)
+    addr = p[p["location"] == "address"]
+    assert (addr["lon"].astype(str) + "," + addr["lat"].astype(str) + "," + addr["parcel_id"]).isin(set(key)).all()
+    shapes = parcels.set_index("parcel_id").geometry
+    for _, r in p[p["location"] == "parcel"].iterrows():
+        assert shapes[r["parcel_id"]].contains(Point(r["lon"], r["lat"]))
 
 
 def test_runs_are_reproducible_and_replicates_differ(inputs):

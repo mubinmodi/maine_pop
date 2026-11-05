@@ -53,6 +53,29 @@ def cmd_run(args) -> None:
     (out / "holdout_blocks.txt").write_text("\n".join(sorted(holdout)) + "\n")
 
 
+def cmd_persons(args) -> None:
+    """One row per synthetic person in one run, with an E911 address point each:
+    data/out/persons_<run>.csv by default."""
+    import numpy as np
+    import pandas as pd
+
+    from .persons import locate, person_table
+
+    sources = _sources(args)
+    run_dir = Path(args.data) / "runs" / args.run
+    persons = pd.read_parquet(run_dir / "persons.parquet")
+    table = person_table(persons, sources.load("pums_persons"))
+    # Its own random stream (model runs use [seed, 0, d] and [seed, 1, r]).
+    rng = np.random.default_rng([sources.area.random_seed, 2])
+    table = table.merge(locate(persons, sources.load("e911"), sources.load("parcels"), rng), on="person_id")
+    out = Path(args.out) if args.out else Path(args.data) / "out" / f"persons_{args.run}.csv"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    table.to_csv(out, index=False)
+    on_address = (table["location"] == "address").mean()
+    print(f"{out}: {len(table):,} persons in {table['household_id'].nunique():,} households, "
+          f"{on_address:.1%} on an E911 address point")
+
+
 def cmd_summarize(args) -> None:
     """Area stats from the saved runs: data/out/area_stats.parquet (main run plus
     published ACS rows) and data/out/validation_stats.parquet."""
@@ -162,6 +185,10 @@ def main(argv=None) -> None:
     r.add_argument("--replicates", type=int, help="fewer replicate runs, for quick checks")
     r.add_argument("--draws", type=int, help="placement draws of the main run")
     r.set_defaults(func=cmd_run)
+    pr = sub.add_parser("persons", help="one row per synthetic person in one run, as CSV")
+    pr.add_argument("--run", default="main", help="run folder under data/runs, e.g. main or draw_01")
+    pr.add_argument("--out", help="output path (default data/out/persons_<run>.csv)")
+    pr.set_defaults(func=cmd_persons)
     sub.add_parser("summarize", help="area stats with replicate standard errors").set_defaults(func=cmd_summarize)
     v = sub.add_parser("validate", help="write docs/validation.md")
     v.add_argument("--docs", default=str(ROOT / "docs"))
