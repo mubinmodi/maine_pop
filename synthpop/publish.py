@@ -6,6 +6,8 @@
   search.parquet        addresses and area names for search
   geo/<level>.geojson   simplified geometry with only `id`, fetched once per level by the app
   people.parquet        the main run's persons with a map point each (publish_people)
+  people_runs/          every run's persons, compactly, for the app's simulation player
+                        (publish_people_runs): index.json, seeds.parquet, <run>.parquet
   area_stats.parquet    written earlier by `synthpop summarize`
 """
 
@@ -130,28 +132,112 @@ def risk_factors(catalog) -> list[str]:
 
 def publish_people(runs_dir: str | Path, data: dict, catalog, area: StudyArea, out_dir: str | Path) -> int:
     """people.parquet: the main run's synthetic persons for the map's people layer, each
-    with an E911 address point, exact age, catalog categories and a fixed uniform draw `u`.
+    with an E911 address point, exact age and poverty ratio, catalog categories and a
+    fixed uniform draw `u`.
     A data point marks a person a case when u < their risk, so changing a model only
     adds or removes cases at the margin instead of reshuffling who has it."""
+    p = people_frame(pd.read_parquet(Path(runs_dir) / "main" / "persons.parquet"), data, catalog, area)
+    p.drop(columns=["seed_serial", "seed_person"]).to_parquet(Path(out_dir) / "people.parquet", index=False)
+    return len(p)
+
+
+def people_frame(persons: pd.DataFrame, data: dict, catalog, area: StudyArea) -> pd.DataFrame:
+    """One run's persons as the people layer shows them, in person_id order: IDs, parcel
+    and block, a map point, exact age and poverty ratio, catalog categories and `u`.
+    Every run uses the same random streams, so the main run matches `synthpop persons`."""
     import numpy as np
 
-    from .persons import family_ids, locate
+    from .persons import HOUSEHOLDER, family_ids, locate
 
-    persons = pd.read_parquet(Path(runs_dir) / "main" / "persons.parquet")
-    persons["family_id"] = family_ids(persons, data["pums_persons"])
-    # Same stream as `synthpop persons`, so the map and the CSV agree.
+    persons = persons.assign(family_id=family_ids(persons, data["pums_persons"]))
     where = locate(persons, data["e911"], data["parcels"], np.random.default_rng([area.random_seed, 2]))
     cols = [v.id for v in catalog.active]
-    seed = data["pums_persons"][["SERIALNO", "SPORDER", "AGEP"]]
+    seed = data["pums_persons"][["SERIALNO", "SPORDER", "AGEP", "POVPIP", "RELSHIPP"]]
     p = (persons[["person_id", "family_id", "household_id", "parcel_id", "block", "seed_serial", "seed_person"] + cols]
          .merge(where, on="person_id")
          .merge(seed, left_on=["seed_serial", "seed_person"], right_on=["SERIALNO", "SPORDER"], how="left")
-         .drop(columns=["seed_serial", "seed_person", "SERIALNO", "SPORDER"])
-         .rename(columns={"AGEP": "age"})
+         .drop(columns=["SERIALNO", "SPORDER"])
+         .rename(columns={"AGEP": "age", "POVPIP": "poverty_ratio"})
          .sort_values("person_id", ignore_index=True))
+    # The householder (PUMS RELSHIPP 20), who names the household's colour on the map.
+    p["head"] = (p.pop("RELSHIPP") == HOUSEHOLDER) & (p["household_id"] >= 0)
     p["u"] = np.random.default_rng([area.random_seed, 3]).random(len(p)).round(4)
-    p.to_parquet(Path(out_dir) / "people.parquet", index=False)
-    return len(p)
+    return p
+
+
+RUN_KINDS = ("main", "draw", "replicate", "validation")
+
+
+def run_names(runs_dir: str | Path) -> list[str]:
+    """Saved runs in playback order: main, placement draws, replicates, validation."""
+    runs = Path(runs_dir)
+    names = ["main"] + sorted(d.name for d in runs.glob("draw_*")) + sorted(d.name for d in runs.glob("replicate_*")) + ["validation"]
+    return [n for n in names if (runs / n / "persons.parquet").exists()]
+
+
+def publish_people_runs(runs_dir: str | Path, data: dict, catalog, area: StudyArea, out_dir: str | Path) -> int:
+    """people_runs/: every saved run's persons, for playing the simulations on the map.
+
+    Only what differs between runs is stored per run, about 0.25 MB each:
+      <run>.parquet   per person, in person_id order: seed (row in seeds), household_id,
+                      in_family (family_id = household_id when true), point (row in points)
+    and what is shared, once:
+      seeds.parquet   one row per seed (PUMS) person any run uses: exact age and poverty
+                      ratio and every catalog category, which depend only on the seed person
+      points.parquet  every map point any run uses: lon, lat, parcel_id, block, location
+      u.parquet       the fixed draw u by person_id; every run uses the same stream
+      index.json      the runs in playback order, with kind, people and households
+    """
+    import numpy as np
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    out = Path(out_dir) / "people_runs"
+    out.mkdir(parents=True, exist_ok=True)
+    for old in out.glob("*.parquet"):
+        old.unlink()
+    key, where = ["seed_serial", "seed_person"], ["lon", "lat", "parcel_id"]
+    attrs = ["age", "poverty_ratio", "head"] + [v.id for v in catalog.active]
+    frames = {name: people_frame(pd.read_parquet(Path(runs_dir) / name / "persons.parquet"), data, catalog, area)
+              for name in run_names(runs_dir)}
+
+    seeds = pd.concat([f[key + attrs] for f in frames.values()]).drop_duplicates(key, ignore_index=True)
+    seeds.insert(0, "seed", np.arange(len(seeds), dtype="int16"))
+    seeds.to_parquet(out / "seeds.parquet", index=False)
+    points = pd.concat([f[where + ["block", "location"]] for f in frames.values()]).drop_duplicates(where, ignore_index=True)
+    points.insert(0, "point", np.arange(len(points), dtype="int32"))
+    points.to_parquet(out / "points.parquet", index=False, compression="zstd")
+    longest = max(frames.values(), key=len)
+    pd.DataFrame({"u": longest["u"].to_numpy()}).to_parquet(out / "u.parquet", index=False)
+
+    index = []
+    for name, f in frames.items():
+        if not np.array_equal(f["u"].to_numpy(), longest["u"].to_numpy()[:len(f)]):
+            raise ValueError(f"run {name} does not share the u stream")
+        f = (f.merge(seeds[key + ["seed"]], on=key, how="left").merge(points[where + ["point"]], on=where, how="left")
+             .sort_values("person_id", ignore_index=True))
+        table = pa.table({"seed": f["seed"].astype("int16"), "household_id": f["household_id"].astype("int32"),
+                          "in_family": f["family_id"].notna().to_numpy(), "point": f["point"].astype("int32")})
+        pq.write_table(table, out / f"{name}.parquet", compression="zstd",
+                       use_dictionary=["seed", "in_family", "point"], column_encoding={"household_id": "DELTA_BINARY_PACKED"})
+        kind = next(k for k in RUN_KINDS if name.startswith(k))
+        index.append({"name": name, "kind": kind, "people": len(f),
+                      "households": int(f.loc[f["household_id"] >= 0, "household_id"].nunique())})
+    (out / "index.json").write_text(json.dumps(index, indent=1) + "\n")
+    publish_household_slots(frames.values(), data["parcels"], out_dir)
+    return len(index)
+
+
+def publish_household_slots(frames, parcels, out_dir: str | Path) -> int:
+    """household_slots.parquet: for every parcel and every number of households (and
+    group-quarters groups) it holds in any run, where on the parcel each one's circle goes
+    (see synthpop.households)."""
+    from .households import slots, unit_counts
+
+    needs = pd.concat([unit_counts(f).rename("n").reset_index() for f in frames]).drop_duplicates(ignore_index=True)
+    table = slots(parcels[parcels["parcel_id"].isin(set(needs["parcel_id"]))], needs)
+    table.to_parquet(Path(out_dir) / "household_slots.parquet", index=False, compression="zstd")
+    return len(table)
 
 
 def publish_cells(runs_dir: str | Path, catalog, out_dir: str | Path) -> dict[str, int]:

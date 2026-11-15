@@ -1,11 +1,13 @@
 """One run's synthetic persons as a flat table, one row per person.
 
-    table = person_table(run_persons, seed_persons)          # person_id, family_id, parcel_id, AGE, SEX, household_id
+    table = person_table(run_persons, seed_persons)          # the COLUMNS below
     where = locate(run_persons, e911, parcels, rng)          # person_id, lon, lat, location
 
 Each synthetic person is a copy of one seed (PUMS) person, named by seed_serial and
-seed_person. Columns in FIELDS are copied from that seed person, so exact age comes
-out here although the run itself only keeps 5-year age groups.
+seed_person. Columns in FIELDS are copied from that seed person, so exact age and the
+exact poverty ratio come out here although the run itself keeps only categories.
+Columns in CATEGORIES are the run's own categories, the ones the model fits to each
+block group's ACS tables, so the table agrees with the map.
 """
 
 from __future__ import annotations
@@ -17,8 +19,12 @@ from shapely.geometry import Point
 
 from .model.place import assign_points, is_residential
 
-FIELDS = {"AGE": "AGEP", "SEX": "SEX"}            # output column -> PUMS person column
-LABELS = {"SEX": {1: "male", 2: "female"}}        # PUMS codes shown as words
+FIELDS = {"AGE": "AGEP", "SEX": "SEX", "POVERTY_RATIO": "POVPIP"}   # output column -> PUMS person column
+LABELS = {"SEX": {1: "male", 2: "female"}}                           # PUMS codes shown as words
+CATEGORIES = {"RACE": "race_eth", "EDUCATION": "education",          # output column -> run category column
+              "POVERTY": "poverty", "EMPLOYMENT": "employment"}
+COLUMNS = ["person_id", "family_id", "parcel_id", "AGE", "SEX", "RACE", "EDUCATION",
+           "POVERTY", "POVERTY_RATIO", "EMPLOYMENT", "household_id"]
 
 # PUMS RELSHIPP codes for the householder (20) and the householder's relatives by birth,
 # marriage or adoption: spouses (21, 23), children (25-27), siblings (28), parents (29),
@@ -28,9 +34,18 @@ HOUSEHOLDER = 20
 RELATIVES = {21, 23, *range(25, 34)}
 
 
-def person_table(persons: pd.DataFrame, seed: pd.DataFrame, fields: dict[str, str] = FIELDS) -> pd.DataFrame:
-    """Group-quarters residents belong to no household, so their household_id is empty.
-    family_id is empty for everyone outside a Census family (see family_ids)."""
+def person_table(persons: pd.DataFrame, seed: pd.DataFrame, fields: dict[str, str] = FIELDS,
+                 categories: dict[str, str] = CATEGORIES) -> pd.DataFrame:
+    """Blank values are outside a column's universe:
+    - household_id: group-quarters residents, who live in no household
+    - family_id: everyone outside a Census family (see family_ids)
+    - EDUCATION: under 25; EMPLOYMENT: under 16
+    - POVERTY, POVERTY_RATIO: people whose poverty status is not determined (institutions,
+      college dorms, military quarters, unrelated children under 15)
+    """
+    missing = [c for c in fields.values() if c not in seed.columns]
+    if missing:
+        raise ValueError(f"the cached PUMS persons lack {missing}; refetch with `synthpop fetch --only pums_persons`")
     joined = _join_seed(persons, seed, list(fields.values()))
     out = pd.DataFrame({
         "person_id": joined["person_id"],
@@ -38,9 +53,12 @@ def person_table(persons: pd.DataFrame, seed: pd.DataFrame, fields: dict[str, st
         "parcel_id": joined["parcel_id"],
     })
     for name, col in fields.items():
-        out[name] = joined[col].map(LABELS[name]) if name in LABELS else joined[col]
+        out[name] = joined[col].map(LABELS[name]) if name in LABELS else joined[col].astype("Int64")
+    for name, col in categories.items():
+        if col in persons.columns:
+            out[name] = persons[col].astype("string").to_numpy()
     out["household_id"] = joined["household_id"].where(joined["household_id"] >= 0).astype("Int64")
-    return out
+    return out[[c for c in COLUMNS if c in out.columns] + [c for c in out.columns if c not in COLUMNS]]
 
 
 def family_ids(persons: pd.DataFrame, seed: pd.DataFrame) -> pd.Series:

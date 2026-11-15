@@ -111,8 +111,13 @@ def create_app(out_dir: str | Path = ROOT / "data" / "out", catalog_path: str | 
         return {"deleted": id}
 
     @api.get("/api/people")
-    def people():
-        return Response(guard(atlas.people), media_type="application/json")
+    def people(run: str | None = None):
+        """One run's people (the main run by default); /api/people/runs lists the runs."""
+        return Response(guard(lambda: atlas.people(run)), media_type="application/json")
+
+    @api.get("/api/people/runs")
+    def people_runs():
+        return atlas.people_runs()
 
     @api.get("/api/search")
     def search(q: str = Query(..., min_length=1)):

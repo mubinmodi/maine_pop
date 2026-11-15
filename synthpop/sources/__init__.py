@@ -34,7 +34,8 @@ E911_URL = f"{GEOLIB}/Maine_E911_Addresses_Feature/FeatureServer/0/query"
 E911_FIELDS = ["SITE_UID", "ADDRESS", "UNIT", "PLACE_TYPE", "MAP_BK_LOT", "ZIPCODE", "TOWN"]
 
 HOUSING_COLS = ["SERIALNO", "PUMA", "WGTP", "NP", "TYPEHUGQ", "BLD", "TEN", "YRBLT", "BDSP", "VALP", "HINCP"]
-PERSON_COLS = ["SERIALNO", "SPORDER", "PUMA", "PWGTP", "AGEP", "SEX", "RAC1P", "HISP", "SCHL", "RELSHIPP"]
+PERSON_COLS = ["SERIALNO", "SPORDER", "PUMA", "PWGTP", "AGEP", "SEX", "RAC1P", "HISP", "SCHL", "RELSHIPP",
+               "POVPIP", "ESR"]
 
 # ACS jam values: -555555555 means "controlled, no sampling error"; other negatives are missing.
 _CONTROLLED = -555555555

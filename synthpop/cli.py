@@ -142,7 +142,7 @@ def cmd_publish(args) -> None:
 
     import pandas as pd
 
-    from .publish import publish, publish_cells, publish_people
+    from .publish import publish, publish_cells, publish_people, publish_people_runs
 
     sources = _sources(args)
     data = sources.load_all()
@@ -151,6 +151,8 @@ def cmd_publish(args) -> None:
     print("published areas:", ", ".join(f"{k} {v:,}" for k, v in counts.items()))
     n = publish_people(Path(args.data) / "runs", data, sources.catalog, sources.area, Path(args.data) / "out")
     print(f"published {n:,} people for the map")
+    n = publish_people_runs(Path(args.data) / "runs", data, sources.catalog, sources.area, Path(args.data) / "out")
+    print(f"published people from {n} runs for the simulation player")
     cells = publish_cells(Path(args.data) / "runs", sources.catalog, Path(args.data) / "out")
     print(f"published risk-factor cells from {cells['draws']} draws and {cells['replicates']} replicates")
 

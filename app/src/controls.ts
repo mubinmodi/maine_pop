@@ -69,7 +69,7 @@ export function mountControls(el: HTMLElement, schema: Schema, state: State, h: 
     </section>
     <section>
       <h2>3D</h2>
-      <label class="check"><input id="extruded" type="checkbox" ${state.extruded ? "checked" : ""}> Extrude areas</label>
+      <label class="check"><input id="extruded" type="checkbox" ${state.extruded ? "checked" : ""}> 3D buildings and areas</label>
       <label>Height by <select id="height">
         <option value="population">People</option><option value="households">Households</option>
         <option value="housing_units">Housing units</option><option value="color">Selected category (count)</option>

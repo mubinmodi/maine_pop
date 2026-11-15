@@ -86,6 +86,38 @@ variables:
       - {id: some_college, label: "Some college or associate"}
       - {id: ba_plus, label: "Bachelor's or higher"}
 
+  # POVPIP is the income-to-poverty ratio in percent (501 = 501% or more). It is blank where
+  # poverty status is not determined: people in institutions, college dorms and military
+  # quarters, and unrelated children under 15, the same universe as ACS table C17002.
+  - id: poverty
+    label: Income-to-poverty ratio
+    kind: seed
+    unit: person
+    universe: "POVPIP == POVPIP"
+    rules:
+      - {category: below_100, when: "POVPIP < 100"}
+      - {category: p100_199, when: "POVPIP < 200"}
+      - {category: p200_plus, when: "POVPIP == POVPIP"}
+    categories:
+      - {id: below_100, label: "Below poverty"}
+      - {id: p100_199, label: "100–199% of poverty"}
+      - {id: p200_plus, label: "200%+ of poverty"}
+
+  # ESR, for people 16 and over. The few Armed Forces members count as employed.
+  - id: employment
+    label: Employment status (16+)
+    kind: seed
+    unit: person
+    universe: "AGEP >= 16"
+    rules:
+      - {category: employed, when: "ESR in [1, 2, 4, 5]"}
+      - {category: unemployed, when: "ESR == 3"}
+      - {category: not_in_lf, when: "ESR == 6"}
+    categories:
+      - {id: employed, label: "Employed"}
+      - {id: unemployed, label: "Unemployed"}
+      - {id: not_in_lf, label: "Not in labor force"}
+
   - id: living_quarters
     label: Living quarters
     kind: seed
@@ -314,6 +346,24 @@ constraints:
       hs: [B15003_017, B15003_018]
       some_college: [B15003_019, B15003_020, B15003_021]
       ba_plus: [B15003_022, B15003_023, B15003_024, B15003_025]
+
+  # Population for whom poverty status is determined (C17002 universe).
+  - id: poverty
+    unit: person
+    by: [poverty]
+    cells:
+      below_100: [C17002_002, C17002_003]
+      p100_199: [C17002_004, C17002_005, C17002_006, C17002_007]
+      p200_plus: [C17002_008]
+
+  # Population 16 and over. Employed includes the Armed Forces (B23025_006).
+  - id: employment
+    unit: person
+    by: [employment]
+    cells:
+      employed: [B23025_004, B23025_006]
+      unemployed: [B23025_005]
+      not_in_lf: [B23025_007]
 
   # Exact: without it the fit fills person totals with group-quarters residents,
   # who are cheap to add, and under-fills household population (docs/validation.md).

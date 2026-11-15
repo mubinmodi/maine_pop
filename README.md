@@ -22,6 +22,7 @@ uv run synthpop build        # model runs, area stats, docs/validation.md, publi
 (cd app && npm install && npm run build)
 uv run synthpop serve        # API and map at http://localhost:8000
 uv run pytest                # tests run on a built-in fixture town, offline
+(cd app && npm test)         # front-end tests: the people, households and map view (vitest)
 ```
 
 The build steps can also run one at a time: `synthpop run`, `summarize`, `validate`, `publish`. Delete files in `data/interim/` to refetch an input.
@@ -30,7 +31,7 @@ The build steps can also run one at a time: `synthpop run`, `summarize`, `valida
 
 ## Deploy
 
-The app is one process: FastAPI serves the API, the geometry files and the built front end, and reads only `data/out/` (about 35 MB for Portland). After building the data:
+The app is one process: FastAPI serves the API, the geometry files and the built front end, and reads only `data/out/` (about 78 MB for Portland, a third of it the people of all 102 runs for the simulation player). After building the data:
 
 ```bash
 docker build --platform linux/arm64 -t maine-synthpop .

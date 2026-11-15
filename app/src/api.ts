@@ -83,11 +83,17 @@ export const deleteDatapoint = (id: string) => send<{ deleted: string }>("DELETE
 
 // The main run's synthetic persons, columnar: codes index each variable's schema categories (-1 blank).
 export type People = {
-  count: number; lon: number[]; lat: number[]; age: number[]; u: number[]; household: number[]; family: number[];
+  count: number; lon: number[]; lat: number[]; age: number[]; poverty_ratio: number[]; u: number[]; household: number[]; family: number[];
   parcel: number[]; parcels: string[]; block: number[]; blocks: string[]; fallback: number[];
   attributes: string[]; codes: Record<string, number[]>;
+  // head: 1 for the householder. unit: each person's household circle (a household, or one
+  // parcel's group-quarters residents), an index into units (centre and radius in metres).
+  head: number[]; unit: number[]; units: { lon: number[]; lat: number[]; r: number[] };
 };
-export const getPeople = () => json<People>("/api/people");
+export const getPeople = (run?: string) => json<People>(run && run !== "main" ? `/api/people?run=${encodeURIComponent(run)}` : "/api/people");
+// The saved runs, in playback order: main, placement draws, replicates, validation.
+export type PeopleRun = { name: string; kind: "main" | "draw" | "replicate" | "validation"; people: number; households: number };
+export const getPeopleRuns = () => json<PeopleRun[]>("/api/people/runs");
 
 const geoCache = new Map<string, Promise<GeoJSON.FeatureCollection>>();
 export const getGeometry = (level: string) => {

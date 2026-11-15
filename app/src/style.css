@@ -50,7 +50,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .ramp i { width: 14px; height: 10px; border-radius: 2px; display: inline-block; }
 .ramp i.faded { background: rgba(29,135,180,.28); outline: 1px dashed var(--ink-2); }
 .legend-note { color: var(--muted); margin-top: 4px; }
-.tip { font: 12px/1.4 system-ui, sans-serif !important; background: #fff !important; color: var(--ink) !important; border: 1px solid var(--grid); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.12); }
+.tip { font: 12px/1.4 system-ui, sans-serif !important; background: #fff !important; color: var(--ink) !important; border: 1px solid var(--grid); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.12); z-index: 6 !important; }
 
 #panel { width: 400px; overflow-y: auto; padding: 14px 18px 28px; background: var(--surface); border-left: 1px solid var(--grid); }
 #panel[hidden] { display: none; }
@@ -140,7 +140,7 @@ button.tiny { padding: 1px 7px; font-size: 12px; }
 .dp-footer { position: sticky; bottom: -28px; background: var(--surface); padding: 10px 0 14px; display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--grid); margin-top: 12px; }
 .error { color: var(--low); }
 #panel .back { margin-bottom: 6px; }
-#people-legend { position: absolute; z-index: 3; right: 12px; top: 112px; background: rgba(252,252,251,.96); padding: 10px 12px; border-radius: 8px; font-size: 12px; box-shadow: 0 1px 6px rgba(0,0,0,.12); max-width: 260px; }
+#people-legend { position: absolute; z-index: 3; right: 12px; top: 150px; background: rgba(252,252,251,.96); padding: 10px 12px; border-radius: 8px; font-size: 12px; box-shadow: 0 1px 6px rgba(0,0,0,.12); max-width: 260px; }
 .people-ramp i { width: 10px; height: 10px; border-radius: 50%; }
 .people-ramp li span { margin-left: auto; padding-left: 10px; color: var(--ink-2); }
 .people-here { margin-top: 10px; padding-top: 2px; border-top: 1px solid var(--grid); }
@@ -170,3 +170,51 @@ button.tiny { padding: 1px 7px; font-size: 12px; }
 #person-table .pt-note { margin: 4px 0 0; }
 #person-table .empty { padding: 8px; color: var(--muted); }
 @media (max-width: 900px) { #person-table { height: 70%; } }
+
+/* 3D on/off button in the map's top-right control stack */
+.maplibregl-ctrl-group button.toggle-3d { width: 29px; height: 29px; padding: 0; font: 600 11px/29px system-ui, sans-serif; color: var(--ink-2); background: #fff; border: 0; border-radius: 4px; }
+.maplibregl-ctrl-group button.toggle-3d[aria-pressed="true"] { color: #fff; background: var(--accent); }
+
+/* Simulation player, under the status line at the top left of the map */
+#player { position: absolute; z-index: 4; left: 12px; top: 44px; width: min(520px, calc(100% - 80px)); background: rgba(252,252,251,.97);
+  border-radius: 8px; box-shadow: 0 1px 6px rgba(0,0,0,.15); padding: 8px 10px 6px; font-size: 12px; }
+#player[hidden] { display: none; }
+#player .pl-row { display: flex; gap: 6px; align-items: center; }
+#player .pl-play { width: 34px; padding: 4px 0; font-size: 13px; }
+#player .pl-scrub { flex: 1; min-width: 80px; accent-color: var(--accent); }
+#player .pl-count { font-variant-numeric: tabular-nums; color: var(--ink-2); min-width: 54px; text-align: right; }
+#player .pl-speed { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px solid var(--axis); border-radius: 6px; background: #fff; }
+#player .pl-label { margin-top: 5px; color: var(--ink); line-height: 1.35; }
+#player .pl-label span { color: var(--muted); }
+#player .pl-ticks { display: flex; gap: 1px; margin-top: 5px; height: 6px; }
+#player .pl-ticks i { flex: 1; border-radius: 1px; opacity: .35; }
+#player .pl-ticks i.on { opacity: 1; transform: scaleY(1.6); }
+#player .k-main { background: #0b0b0b; } #player .k-draw { background: #2a78d6; }
+#player .k-replicate { background: #1baf7a; } #player .k-validation { background: #eb6834; }
+#controls .pp-buttons { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
+#controls .pp-buttons button { width: 100%; text-align: left; }
+#controls .row > * { min-width: 0; }
+#controls { overflow-x: hidden; }
+
+/* Household circles: the legend's size key and the card for the open household. */
+.hh-key { display: flex; gap: 8px; align-items: center; margin: 0 0 6px; }
+.hh-key svg { flex: none; }
+.hh-key circle { fill: rgba(42,120,214,.55); stroke: #fff; stroke-width: 1; }
+#household-card { position: absolute; z-index: 5; right: 12px; bottom: 28px; width: 300px; max-height: calc(100% - 200px); overflow-y: auto;
+  background: rgba(252,252,251,.98); padding: 10px 12px; border-radius: 8px; font-size: 12px; box-shadow: 0 1px 8px rgba(0,0,0,.16); }
+#household-card[hidden] { display: none; }
+#person-table:not([hidden]) ~ #household-card { bottom: calc(46% + 12px); max-height: calc(54% - 200px); }
+#household-card header { display: flex; align-items: baseline; gap: 6px; padding-right: 22px; position: relative; font-size: 13px; }
+#household-card header .src { color: var(--muted); font-size: 12px; }
+#household-card .hc-close { position: absolute; right: -4px; top: -4px; font-size: 16px; }
+#household-card .hc-facts { margin: 4px 0; color: var(--ink-2); }
+.hc-members { list-style: none; margin: 6px 0; padding: 0; border-top: 1px solid var(--grid); }
+.hc-members button { display: flex; width: 100%; gap: 8px; align-items: center; padding: 4px 4px; background: none; border: none;
+  border-bottom: 1px solid var(--grid); font: inherit; text-align: left; cursor: pointer; color: inherit; }
+.hc-members button:hover { background: rgba(0,0,0,.04); }
+.hc-members button.on { background: rgba(42,120,214,.12); font-weight: 600; }
+.hc-members i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.hc-members .hc-role { min-width: 92px; }
+.hc-members .hc-id { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hc-person { padding: 6px 0; line-height: 1.45; }
+.hc-foot { display: flex; justify-content: flex-end; }

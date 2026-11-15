@@ -2,15 +2,20 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import {
-  deleteDatapoint, exportUrl, getDetail, getGeometry, getLayer, getPeople, getSchema, previewDatapoint, previewDetail, saveDatapoint,
-  type LayerValues, type RiskModel, type Schema,
+  deleteDatapoint, exportUrl, getDetail, getGeometry, getLayer, getPeople, getPeopleRuns, getSchema, previewDatapoint, previewDetail,
+  saveDatapoint, type LayerValues, type People, type RiskModel, type Schema,
 } from "./api";
 import { mountControls, type State } from "./controls";
 import { openEditor } from "./editor";
 import { levelForZoom, levelLabel, zoomForLevel } from "./levels";
 import { divergingBreaks, fmt, renderLegend, renderLevel } from "./mapLayer";
 import { showDetail } from "./panel";
-import { MIN_ZOOM, mountPeopleControls, mountPeopleHere, PeopleLayer, type PeopleState } from "./people";
+import { peopleLayers, peopleTooltip } from "./peopleLayers";
+import { mountPeopleControls, mountPeopleHere, renderPeopleLegend } from "./peoplePanels";
+import { MIN_ZOOM, PeopleView, type PeopleState } from "./peopleView";
+import { Population } from "./population";
+import { HouseholdCard } from "./householdCard";
+import { Player } from "./player";
 import { PersonTable } from "./personTable";
 
 // Zoom that frames an area's people when it is clicked.
@@ -36,15 +41,30 @@ async function start() {
     maxBounds: [[-70.6, 43.5], [-69.9, 43.85]], attributionControl: { compact: true },
   });
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+  // 3D on/off: extrudes areas (parcels as buildings) or lays them flat. Kept in step with
+  // the sidebar's "3D buildings and areas" checkbox.
+  const toggle3d = document.createElement("button");
+  toggle3d.type = "button";
+  toggle3d.className = "toggle-3d";
+  toggle3d.textContent = "3D";
+  const sync3d = () => {
+    toggle3d.setAttribute("aria-pressed", String(state.extruded));
+    toggle3d.title = state.extruded ? "Turn 3D buildings off" : "Turn 3D buildings on";
+    const box = document.getElementById("extruded") as HTMLInputElement | null;
+    if (box) box.checked = state.extruded;
+  };
+  toggle3d.onclick = () => { state.extruded = !state.extruded; sync3d(); refresh(); };
+  map.addControl({
+    onAdd: () => { const g = document.createElement("div"); g.className = "maplibregl-ctrl maplibregl-ctrl-group"; g.append(toggle3d); return g; },
+    onRemove: () => {},
+  }, "top-right");
   // Keep the canvas filling its box if the map was created while hidden or narrow.
   new ResizeObserver(() => map.resize()).observe(document.getElementById("map-wrap")!);
   const overlay = new MapboxOverlay({
     interleaved: false, layers: [],
     getTooltip: (info) => {
-      if (info.layer?.id === "people") {
-        const i = people && info.index >= 0 ? people.person(info.index) : -1;
-        return i >= 0 ? { html: people!.tooltip(i), className: "tip" } : null;
-      }
+      const tip = view ? peopleTooltip(view, info) : undefined;
+      if (tip !== undefined) return tip ? { html: tip, className: "tip" } : null;
       const object = info.object;
       const id = object?.properties?.id as string | undefined;
       const v = id && current.color?.values[id];
@@ -67,25 +87,50 @@ async function start() {
   let seq = 0;
   let cityRate: number | null = null;
 
-  // People: every synthetic person as a dot. Data points apply to them in the browser,
-  // so the dots recolour and filter as soon as a data point is added or a slider moves.
+  // People: every synthetic household as a circle on its parcel; clicking one shows its
+  // people. Data points apply to them in the browser, so households recolour and filter as
+  // soon as a data point is added or a slider moves.
   // colorBy starts empty, so people open coloured by the first saved data point (else age).
   const pstate: PeopleState = { show: true, colorBy: "", filters: [] };
-  let people: PeopleLayer | null = null;
+  let view: PeopleView | null = null;
   const peopleSection = document.createElement("section");
   peopleSection.className = "people";
   const peopleLegend = document.getElementById("people-legend")!;
   let areaArgs: Parameters<typeof renderLevel> | null = null;
   let areaLayer: ReturnType<typeof renderLevel> | null = null;
   let areaFaded = false;
-  const peopleOn = () => !!people && pstate.show && map.getZoom() >= MIN_ZOOM;
-  // The person table: clicking a row flies to that person and opens their parcel.
+  const peopleOn = () => !!view && view.visibleAt(map.getZoom());
+  // The simulation player swaps the people layer through every saved run; closing it goes back to main.
+  let player: Player | null = null;
+  let mainPeople: People | null = null;
+  // The person table: clicking a row picks that person and flies to their household.
+  let recentre = false;
   const personTable = new PersonTable(document.getElementById("person-table")!, (i) => {
-    if (!people) return;
+    if (!view) return;
     pstate.show = true;
-    map.flyTo({ center: [people.p.lon[i], people.p.lat[i]], zoom: Math.max(map.getZoom(), 17.5), speed: 1.4 });
-    openDetail("parcel", people.p.parcels[people.p.parcel[i]]);
+    recentre = true;
+    view.pick(i);
   });
+  // The household card: the open household's people.
+  const card = new HouseholdCard(document.getElementById("household-card")!, (id) => openDetail("parcel", id));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") view?.close(); });
+
+  /** When a household opens, zoom in until its circle is big enough to show its people
+   * (and recentre on it after a pick from the person table). */
+  let lastUnit = -1;
+  function fitOpenHousehold() {
+    const sel = view?.selection;
+    const unit = sel?.unit ?? -1;
+    if (!sel || (unit === lastUnit && !recentre)) { lastUnit = unit; recentre = false; return; }
+    lastUnit = unit;
+    const h = view!.pop.household(unit);
+    const scale = 156543.03 * Math.cos((h.lat * Math.PI) / 180);       // metres per pixel at zoom 0
+    if (recentre || h.r / (scale / 2 ** map.getZoom()) < 28) {
+      const zoom = Math.min(20.5, Math.log2((scale * 60) / Math.max(h.r, 0.5)));
+      map.flyTo({ center: [h.lon, h.lat], zoom: Math.max(map.getZoom(), zoom), speed: 1.4 });
+    }
+    recentre = false;
+  }
 
   function draw() {
     const fade = peopleOn();
@@ -94,9 +139,10 @@ async function start() {
       areaLayer = renderLevel(level, geometry, color, extrude, { ...opts, fade });
       areaFaded = fade;
     }
-    const pl = people?.layer(map.getZoom(), pstate, (parcel) => openDetail("parcel", parcel));
-    overlay.setProps({ layers: [areaLayer, pl].filter(Boolean) });
-    people?.legend(peopleLegend, pstate, map.getZoom());
+    const pl = view ? peopleLayers(view, map.getZoom()) : [];
+    overlay.setProps({ layers: [areaLayer, ...pl].filter(Boolean) });
+    if (view) renderPeopleLegend(peopleLegend, view, map.getZoom());
+    card.render(view, peopleOn());
     personTable.refresh();
   }
 
@@ -104,16 +150,17 @@ async function start() {
     const controls = document.getElementById("controls")!;
     const after = controls.querySelector(".datapoints") ?? controls.querySelector(".search");
     after?.after(peopleSection);
-    mountPeopleControls(peopleSection, people, pstate, draw, () => people && personTable.show(people, pstate));
+    mountPeopleControls(peopleSection, view, draw, () => view && personTable.show(view),
+      player ? () => { pstate.show = true; pstate.anyZoom = true; player!.show(); draw(); } : undefined);
   }
 
   /** Colour people by a data point and drop filters on ones that no longer exist. */
   function syncPeople(colorBy?: string) {
-    if (!people) return;
-    const ids = new Set(people.dims().map((d) => d.id));
+    if (!view) return;
+    const dims = view.pop.dims(), ids = new Set(dims.map((d) => d.id));
     pstate.filters = pstate.filters.filter((f) => ids.has(f.by));
     if (colorBy && ids.has(colorBy)) pstate.colorBy = colorBy;
-    if (!ids.has(pstate.colorBy)) pstate.colorBy = people.dims().find((d) => d.kind === "datapoint")?.id ?? "age_band";
+    if (!ids.has(pstate.colorBy)) pstate.colorBy = dims.find((d) => d.kind === "datapoint")?.id ?? "age_band";
     mountPeople();
     draw();
   }
@@ -176,14 +223,14 @@ async function start() {
       pstate.focus = null;
       if (draft) startEditing(draft, isSavedId(draft.id)); else { panel.hidden = true; refresh(); }
     }, draft ? "Back to editor" : undefined);
-    if (people && level !== "county" && level !== "state") {
+    if (view && level !== "county" && level !== "state") {
       // The clicked area's own people: summary, table and CSV; people elsewhere fade on the map.
       const focus = { level, id };
       pstate.focus = level === "city" ? null : focus;
       const here = document.createElement("section");
       panel.querySelector("p.hint")?.after(here);
       const show = () => map.flyTo({ center: [d.area.lon, d.area.lat], zoom: Math.max(map.getZoom(), PEOPLE_ZOOM[level] ?? MIN_ZOOM), speed: 1.4 });
-      mountPeopleHere(here, people, focus, show);
+      mountPeopleHere(here, view.pop, focus, show);
       // Clicking a structure while zoomed out goes straight to its people.
       if (pstate.show && map.getZoom() < MIN_ZOOM && level !== "city") show();
     }
@@ -204,7 +251,7 @@ async function start() {
     const editor = openEditor(panel, schema, model, saved, {
       onChange: (m) => {
         if (editing) editing.model = m;
-        people?.setDraft(m);
+        view?.pop.setDraft(m);
         draw();
         if (inFlight) again = true; else preview();
       },
@@ -214,24 +261,24 @@ async function start() {
         editing = null;
         panel.hidden = true;
         Object.assign(state, { variable: m.id, category: "yes", measure: "share" });
-        for (const f of pstate.filters) if (f.by === people?.draftId()) f.by = `dp:${m.id}`;
-        people?.setDraft(null);
-        people?.setSchema(schema);
+        for (const f of pstate.filters) if (f.by === view?.pop.draftId()) f.by = `dp:${m.id}`;
+        view?.pop.setDraft(null);
+        view?.pop.setSchema(schema);
         remountControls();
         syncPeople(`dp:${m.id}`);
         refresh();
       },
       onClose: () => {
         // Filters that followed the draft go back to the saved data point (or drop, if unsaved).
-        const draft = people?.draftId();
+        const draft = view?.pop.draftId();
         if (saved) for (const f of pstate.filters) if (f.by === draft) f.by = `dp:${model.id}`;
-        editing = null; panel.hidden = true; people?.setDraft(null); syncPeople(); refresh();
+        editing = null; panel.hidden = true; view?.pop.setDraft(null); syncPeople(); refresh();
       },
     });
     editing = { model, editor };
-    people?.setDraft(model);
+    view?.pop.setDraft(model);
     // While a saved data point is edited, filters on it follow the draft, so sliders change who shows.
-    const draft = people?.draftId();
+    const draft = view?.pop.draftId();
     if (saved && draft) for (const f of pstate.filters) if (f.by === `dp:${model.id}`) f.by = draft;
     syncPeople(draft ?? undefined);
     refresh();
@@ -240,7 +287,7 @@ async function start() {
   const blank = (): RiskModel => ({ id: "new_data_point", label: "New data point", baseline: 0.1, odds_ratios: {}, universe: {}, description: "", source: "" });
 
   const handlers = {
-    onChange: refresh,
+    onChange: () => { sync3d(); refresh(); },
     onNewDatapoint: (preset: RiskModel | null) => {
       const m = preset ? { ...JSON.parse(JSON.stringify(preset)) } : blank();
       if (isSavedId(m.id)) m.id = `${m.id}_2`;
@@ -255,7 +302,7 @@ async function start() {
       if (!window.confirm(`Remove the data point "${v?.label ?? id}"? It is deleted from config/datapoints.yaml.`)) return;
       await deleteDatapoint(id);
       schema = await getSchema();
-      people?.setSchema(schema);
+      view?.pop.setSchema(schema);
       if (state.variable === id) Object.assign(state, { variable: "population", category: "total", measure: "estimate" });
       remountControls();
       syncPeople();
@@ -270,9 +317,19 @@ async function start() {
   };
   const remountControls = () => { mountControls(document.getElementById("controls")!, schema, state, handlers); mountPeople(); };
   remountControls();
+  sync3d();
   getPeople().then((p) => {
-    people = new PeopleLayer(p, schema);
+    view = new PeopleView(new Population(p, "main", schema), pstate);
+    view.onChange = () => { fitOpenHousehold(); draw(); };
+    mainPeople = p;
     syncPeople();
+    getPeopleRuns().then((runs) => {
+      if (runs.length < 2) return;
+      player = new Player(document.getElementById("player")!, runs, p,
+        (frame, run) => view!.setRun(frame, run.name),
+        () => { pstate.anyZoom = false; if (mainPeople) view!.setRun(mainPeople, "main"); else draw(); });
+      mountPeople();
+    }).catch(() => { /* no saved runs: the player stays hidden */ });
   }).catch((e) => { peopleSection.innerHTML = `<h2>People</h2><p class="hint">People are unavailable: ${e.message}</p>`; });
 
   let lastLevel = "";

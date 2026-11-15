@@ -56,12 +56,21 @@ def test_people_match_their_households(inputs):
 def test_person_table_copies_exact_age_and_sex_from_the_seed(inputs, sources):
     placed = model.run(inputs, Run.main())
     table = person_table(placed.persons, sources.load("pums_persons"))
-    assert list(table.columns) == ["person_id", "family_id", "parcel_id", "AGE", "SEX", "household_id"]
+    assert list(table.columns) == ["person_id", "family_id", "parcel_id", "AGE", "SEX", "RACE", "EDUCATION",
+                                   "POVERTY", "POVERTY_RATIO", "EMPLOYMENT", "household_id"]
     assert len(table) == len(placed.persons) and table["AGE"].notna().all()
     p = placed.persons.set_index("person_id").loc[table["person_id"]]
     assert (table["SEX"].to_numpy() == p["sex"].astype(str).to_numpy()).all()
     assert ((table["AGE"] >= 65).to_numpy() == (p["age65_plus"].astype(str) == "yes").to_numpy()).all()
     assert table.loc[p["household_id"].to_numpy() < 0, "household_id"].isna().all()
+    # categories are the run's own; the exact ratio agrees with the poverty category
+    for col, var in (("RACE", "race_eth"), ("EDUCATION", "education"), ("POVERTY", "poverty"), ("EMPLOYMENT", "employment")):
+        assert table[col].fillna("").tolist() == p[var].astype("string").fillna("").tolist()
+    assert (table["AGE"].lt(25) == table["EDUCATION"].isna()).all()
+    assert (table["AGE"].lt(16) == table["EMPLOYMENT"].isna()).all()
+    assert (table["POVERTY_RATIO"].isna() == table["POVERTY"].isna()).all()
+    below = table.dropna(subset=["POVERTY"])
+    assert ((below["POVERTY_RATIO"] < 100) == (below["POVERTY"] == "below_100")).all()
 
 
 def test_family_is_the_householder_and_their_relatives():

@@ -70,7 +70,7 @@ export type RenderOptions = {
   scheme: Scheme;
   reference: number | null;      // Portland-wide value, for the vs_city scheme
   breaks: number[];              // class edges (differences from the reference for vs_city)
-  fade?: boolean;                // flat and faint, so the people layer reads on top
+  fade?: boolean;                // people are shown: buildings turn to see-through glass (or flat and faint without 3D)
 };
 
 export function classOf(v: number, breaks: number[]): number {
@@ -101,8 +101,11 @@ export function renderLevel(
     pickable: true,
     stroked: true,
     filled: true,
-    extruded: opts.extruded && extrude !== null && !opts.fade,
-    opacity: opts.fade ? 0.35 : 1,
+    extruded: opts.extruded && extrude !== null,
+    opacity: opts.fade ? (opts.extruded && extrude !== null ? 0.4 : 0.35) : 1,
+    // With people shown, buildings draw without writing depth, so the people columns
+    // standing inside them (and behind them) stay visible through the walls.
+    parameters: opts.fade ? { depthWriteEnabled: false } : {},
     wireframe: false,
     lineWidthUnits: "pixels",
     getLineWidth: (f: GeoJSON.Feature) => ((f.properties as { id: string }).id === opts.selected ? 3 : level === "parcel" ? 0.4 : 1),

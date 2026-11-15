@@ -8,7 +8,7 @@ from synthpop import model
 from synthpop.api import create_app
 from synthpop.atlas import Atlas, Filter
 from synthpop.model import Run
-from synthpop.publish import publish, publish_people
+from synthpop.publish import publish, publish_people, publish_people_runs
 from synthpop.summarize import RunData, published, summarize
 from conftest import AREA, CATALOG_PATH
 
@@ -25,9 +25,11 @@ def out_dir(sources, catalog, tmp_path):
     out.mkdir()
     pd.concat([stats, published(data["acs"], catalog)]).to_parquet(out / "area_stats.parquet", index=False)
     publish(data, runs[0].capacity, AREA, out)
-    (tmp_path / "runs" / "main").mkdir(parents=True)
-    runs[0].persons.to_parquet(tmp_path / "runs" / "main" / "persons.parquet", index=False)
+    for name, placed in (("main", runs[0]), ("draw_01", runs[1]), ("replicate_01", reps[0])):
+        (tmp_path / "runs" / name).mkdir(parents=True)
+        placed.persons.to_parquet(tmp_path / "runs" / name / "persons.parquet", index=False)
     publish_people(tmp_path / "runs", data, catalog, AREA, out)
+    publish_people_runs(tmp_path / "runs", data, catalog, AREA, out)
     return out
 
 
@@ -84,6 +86,9 @@ def test_api_routes(out_dir, tmp_path):
     assert bad.status_code == 400
     assert client.get("/geo/block_group.geojson").status_code == 200
     assert client.get("/api/people").json()["count"] > 0
+    assert [r["name"] for r in client.get("/api/people/runs").json()] == ["main", "draw_01", "replicate_01"]
+    assert client.get("/api/people", params={"run": "draw_01"}).json()["count"] > 0
+    assert client.get("/api/people", params={"run": "../people"}).status_code == 404
     r = client.get("/api/export", params={"level": "block_group", "format": "csv"})
     assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
 
@@ -91,7 +96,7 @@ def test_api_routes(out_dir, tmp_path):
 def test_people_are_one_columnar_document_coded_by_schema_category(atlas, catalog):
     body = json.loads(atlas.people())
     n = body["count"]
-    assert n > 0 and all(len(body[k]) == n for k in ("lon", "lat", "age", "u", "household", "family", "parcel", "block", "fallback"))
+    assert n > 0 and all(len(body[k]) == n for k in ("lon", "lat", "age", "u", "household", "family", "poverty_ratio", "parcel", "block", "fallback"))
     assert all(0 <= u < 1 for u in body["u"])
     for a in body["attributes"]:
         cats = catalog.variable(a).category_ids
@@ -102,6 +107,16 @@ def test_people_are_one_columnar_document_coded_by_schema_category(atlas, catalo
     assert {body["parcels"][i] for i in body["parcel"]} <= set(p["parcel_id"])
     assert [body["blocks"][i] for i in body["block"]] == p["block"].tolist()
     assert sum(body["fallback"]) == int((p["location"] == "parcel").sum())
+    # every household has one householder, and its people share one circle
+    assert len(body["head"]) == n and len(body["unit"]) == n
+    heads = pd.Series(body["head"]).groupby(pd.Series(body["household"])).sum()
+    assert (heads.drop(-1, errors="ignore") == 1).all()
+    by_unit = pd.DataFrame({"unit": body["unit"], "household": body["household"], "parcel": body["parcel"]})
+    hh = by_unit[by_unit["household"] >= 0]
+    assert (hh.groupby("household")["unit"].nunique() == 1).all() and (by_unit.groupby("unit")["parcel"].nunique() == 1).all()
+    units = body["units"]
+    assert len(units["lon"]) == len(units["lat"]) == len(units["r"]) == by_unit["unit"].nunique()
+    assert all(r > 0 for r in units["r"])
 
 
 def test_password_protects_everything_but_the_health_check(out_dir, tmp_path):
@@ -113,3 +128,17 @@ def test_password_protects_everything_but_the_health_check(out_dir, tmp_path):
     assert client.get("/api/schema", headers={"Authorization": "Basic not-base64!"}).status_code == 401
     assert client.get("/api/schema", auth=("synthpop", "s3cret")).status_code == 200
     assert client.get("/geo/block_group.geojson", auth=("synthpop", "s3cret")).status_code == 200
+
+
+def test_every_run_plays_as_the_same_document_rebuilt_from_shared_seeds(atlas):
+    runs = atlas.people_runs()
+    assert [(r["name"], r["kind"]) for r in runs] == [("main", "main"), ("draw_01", "draw"), ("replicate_01", "replicate")]
+    main = json.loads(atlas.people())
+    # the main run rebuilt from people_runs/ matches people.parquet exactly
+    assert json.loads(atlas._people_body(atlas._run_frame("main"))) == main
+    for r in runs[1:]:
+        body = json.loads(atlas.people(r["name"]))
+        assert body["count"] == r["people"] and body["attributes"] == main["attributes"]
+        assert len({h for h in body["household"] if h >= 0}) == r["households"]
+    with pytest.raises(KeyError):
+        atlas.people("draw_99")

@@ -4,11 +4,11 @@ Synthetic estimates for Portland, Maine, aggregated from parcels, compared with 
 
 ## Headline
 
-- **City people**: 68,711 ± 506 synthetic vs 68,854 ± 52 ACS (90% margins; difference -0.2%)
-- **City households**: 33,287 ± 555 synthetic vs 32,965 ± 785 ACS (90% margins; difference +1.0%)
-- **City people 65+**: 11,482 ± 749 synthetic vs 11,616 ± 772 ACS (90% margins; difference -1.2%)
-- **Block-group cells inside the ACS 90% margin**: 99.9% of 5,103
-- **Held-out blocks, population share**: correlation 0.83 with 2020 Census (land-area baseline 0.68) across 162 blocks
+- **City people**: 68,673 ± 370 synthetic vs 68,854 ± 52 ACS (90% margins; difference -0.3%)
+- **City households**: 33,338 ± 491 synthetic vs 32,965 ± 785 ACS (90% margins; difference +1.1%)
+- **City people 65+**: 11,501 ± 857 synthetic vs 11,616 ± 772 ACS (90% margins; difference -1.0%)
+- **Block-group cells inside the ACS 90% margin**: 99.9% of 5,469
+- **Held-out blocks, population share**: correlation 0.84 with 2020 Census (land-area baseline 0.68) across 162 blocks
 
 ## 1. Fit to published ACS, by level
 
@@ -16,91 +16,97 @@ Synthetic counts from the main run, summed up from parcels, against ACS 2020–2
 
 | level | variable | comparisons | within 90% MOE | median RAE | total synthetic | total published |
 |---|---|---|---|---|---|---|
-| block_group | age65_plus | 122 | 100% | 0.04 | 68,711 | 68,761 |
-| block_group | age_group | 1,098 | 100% | 0.04 | 68,711 | 68,761 |
-| block_group | age_sex | 2,196 | 100% | 0.04 | 68,711 | 68,761 |
-| block_group | education | 244 | 100% | 0.04 | 52,237 | 52,208 |
-| block_group | household_size | 305 | 100% | 0.05 | 33,287 | 32,910 |
-| block_group | households | 61 | 100% | 0.08 | 33,287 | 32,910 |
+| block_group | age65_plus | 122 | 100% | 0.04 | 68,673 | 68,761 |
+| block_group | age_group | 1,098 | 100% | 0.04 | 68,673 | 68,761 |
+| block_group | age_sex | 2,196 | 100% | 0.04 | 68,673 | 68,761 |
+| block_group | education | 244 | 100% | 0.04 | 52,153 | 52,208 |
+| block_group | employment | 183 | 100% | 0.04 | 59,261 | 59,319 |
+| block_group | household_size | 305 | 100% | 0.06 | 33,338 | 32,910 |
+| block_group | households | 61 | 100% | 0.08 | 33,338 | 32,910 |
 | block_group | housing_units | 61 | 92% | 0.46 | 35,549 | 36,430 |
-| block_group | living_quarters | 101 | 100% | 0.00 | 68,711 | 68,761 |
-| block_group | population | 61 | 100% | 0.01 | 68,711 | 68,761 |
-| block_group | race_eth | 305 | 100% | 0.04 | 68,711 | 68,761 |
-| block_group | sex | 122 | 100% | 0.04 | 68,711 | 68,761 |
-| block_group | structure | 305 | 100% | 0.06 | 33,287 | 32,910 |
-| block_group | tenure | 122 | 100% | 0.08 | 33,287 | 32,910 |
-| tract | age65_plus | 38 | 100% | 0.05 | 67,665 | 67,722 |
-| tract | age_group | 342 | 100% | 0.05 | 67,665 | 67,722 |
-| tract | age_sex | 684 | 100% | 0.05 | 67,665 | 67,722 |
-| tract | education | 76 | 100% | 0.05 | 51,344 | 51,298 |
-| tract | household_size | 95 | 100% | 0.08 | 32,767 | 32,385 |
-| tract | households | 19 | 100% | 0.13 | 32,767 | 32,385 |
+| block_group | living_quarters | 101 | 100% | 0.00 | 68,673 | 68,761 |
+| block_group | population | 61 | 100% | 0.01 | 68,673 | 68,761 |
+| block_group | poverty | 183 | 100% | 0.04 | 66,977 | 67,270 |
+| block_group | race_eth | 305 | 100% | 0.04 | 68,673 | 68,761 |
+| block_group | sex | 122 | 100% | 0.04 | 68,673 | 68,761 |
+| block_group | structure | 305 | 100% | 0.06 | 33,338 | 32,910 |
+| block_group | tenure | 122 | 100% | 0.08 | 33,338 | 32,910 |
+| tract | age65_plus | 38 | 100% | 0.03 | 67,641 | 67,722 |
+| tract | age_group | 342 | 100% | 0.05 | 67,641 | 67,722 |
+| tract | age_sex | 684 | 100% | 0.04 | 67,641 | 67,722 |
+| tract | education | 76 | 100% | 0.04 | 51,268 | 51,298 |
+| tract | employment | 57 | 100% | 0.05 | 58,329 | 58,371 |
+| tract | household_size | 95 | 100% | 0.08 | 32,816 | 32,385 |
+| tract | households | 19 | 100% | 0.15 | 32,816 | 32,385 |
 | tract | housing_units | 19 | 84% | 0.42 | 34,268 | 35,080 |
-| tract | living_quarters | 37 | 100% | 0.00 | 67,665 | 67,722 |
-| tract | population | 19 | 100% | 0.02 | 67,665 | 67,722 |
-| tract | race_eth | 95 | 100% | 0.05 | 67,665 | 67,722 |
-| tract | sex | 38 | 100% | 0.04 | 67,665 | 67,722 |
-| tract | structure | 95 | 100% | 0.10 | 32,767 | 32,385 |
-| tract | tenure | 38 | 100% | 0.10 | 32,767 | 32,385 |
-| city | age65_plus | 2 | 100% | 0.09 | 68,711 | 68,854 |
-| city | age_group | 18 | 100% | 0.08 | 68,711 | 68,854 |
-| city | age_sex | 36 | 100% | 0.10 | 68,711 | 68,854 |
-| city | education | 4 | 100% | 0.18 | 52,237 | 52,291 |
-| city | household_size | 5 | 100% | 0.22 | 33,287 | 32,965 |
-| city | households | 1 | 100% | 0.41 | 33,287 | 32,965 |
+| tract | living_quarters | 37 | 100% | 0.00 | 67,641 | 67,722 |
+| tract | population | 19 | 100% | 0.01 | 67,641 | 67,722 |
+| tract | poverty | 57 | 100% | 0.04 | 65,951 | 66,231 |
+| tract | race_eth | 95 | 100% | 0.05 | 67,641 | 67,722 |
+| tract | sex | 38 | 100% | 0.03 | 67,641 | 67,722 |
+| tract | structure | 95 | 100% | 0.10 | 32,816 | 32,385 |
+| tract | tenure | 38 | 100% | 0.11 | 32,816 | 32,385 |
+| city | age65_plus | 2 | 100% | 0.09 | 68,673 | 68,854 |
+| city | age_group | 18 | 100% | 0.09 | 68,673 | 68,854 |
+| city | age_sex | 36 | 100% | 0.08 | 68,673 | 68,854 |
+| city | education | 4 | 100% | 0.17 | 52,153 | 52,291 |
+| city | employment | 3 | 100% | 0.30 | 59,261 | 59,402 |
+| city | household_size | 5 | 100% | 0.24 | 33,338 | 32,965 |
+| city | households | 1 | 100% | 0.48 | 33,338 | 32,965 |
 | city | housing_units | 1 | 0% | 1.27 | 35,549 | 36,559 |
-| city | living_quarters | 2 | 50% | 0.90 | 68,711 | 68,854 |
-| city | population | 1 | 0% | 2.76 | 68,711 | 68,854 |
-| city | race_eth | 5 | 100% | 0.27 | 68,711 | 68,854 |
-| city | sex | 2 | 100% | 0.10 | 68,711 | 68,854 |
-| city | structure | 5 | 100% | 0.06 | 33,287 | 32,965 |
-| city | tenure | 2 | 100% | 0.19 | 33,287 | 32,965 |
+| city | living_quarters | 2 | 50% | 1.13 | 68,673 | 68,854 |
+| city | population | 1 | 0% | 3.48 | 68,673 | 68,854 |
+| city | poverty | 3 | 100% | 0.09 | 66,977 | 67,363 |
+| city | race_eth | 5 | 100% | 0.30 | 68,673 | 68,854 |
+| city | sex | 2 | 100% | 0.09 | 68,673 | 68,854 |
+| city | structure | 5 | 100% | 0.06 | 33,338 | 32,965 |
+| city | tenure | 2 | 100% | 0.22 | 33,338 | 32,965 |
 
 ## 2. City snapshot
 
 | variable | category | synthetic ± 90% | ACS ± 90% | inside ACS margin |
 |---|---|---|---|---|
-| age_group | a0_4 | 2,891 ± 409 | 2,985 ± 459 | yes |
-| age_group | a5_9 | 3,080 ± 458 | 3,092 ± 459 | yes |
-| age_group | a10_14 | 2,689 ± 454 | 2,811 ± 481 | yes |
-| age_group | a15_19 | 2,740 ± 371 | 2,756 ± 339 | yes |
-| age_group | a20_24 | 5,073 ± 612 | 4,919 ± 625 | yes |
-| age_group | a25_29 | 7,358 ± 691 | 7,441 ± 652 | yes |
-| age_group | a30_34 | 6,841 ± 639 | 6,810 ± 522 | yes |
-| age_group | a35_39 | 6,041 ± 528 | 6,005 ± 550 | yes |
-| age_group | a40_44 | 4,280 ± 482 | 4,232 ± 465 | yes |
-| age_group | a45_49 | 4,133 ± 427 | 4,167 ± 423 | yes |
-| age_group | a50_54 | 3,763 ± 432 | 3,730 ± 438 | yes |
-| age_group | a55_59 | 3,903 ± 469 | 3,943 ± 461 | yes |
-| age_group | a60_64 | 4,435 ± 485 | 4,347 ± 434 | yes |
-| age_group | a65_69 | 3,865 ± 553 | 3,845 ± 450 | yes |
-| age_group | a70_74 | 2,688 ± 323 | 2,695 ± 317 | yes |
-| age_group | a75_79 | 1,980 ± 419 | 1,990 ± 283 | yes |
-| age_group | a80_84 | 1,309 ± 313 | 1,380 ± 301 | yes |
-| age_group | a85_plus | 1,640 ± 461 | 1,706 ± 350 | yes |
-| age65_plus | yes | 11,482 ± 749 | 11,616 ± 772 | yes |
-| age65_plus | no | 57,229 ± 1,042 | 57,238 ± 1,774 | yes |
-| race_eth | white | 53,802 ± 1,167 | 53,375 ± 1,095 | yes |
-| race_eth | black | 5,858 ± 711 | 6,244 ± 716 | yes |
-| race_eth | asian | 2,563 ± 521 | 2,689 ± 471 | yes |
-| race_eth | other | 4,386 ± 584 | 4,394 ± 731 | yes |
-| race_eth | hispanic | 2,102 ± 412 | 2,152 ± 382 | yes |
-| education | lt_hs | 1,903 ± 579 | 1,839 ± 324 | yes |
-| education | hs | 8,020 ± 649 | 7,906 ± 682 | yes |
-| education | some_college | 11,337 ± 879 | 11,328 ± 878 | yes |
-| education | ba_plus | 30,977 ± 943 | 31,218 ± 1,298 | yes |
-| household_size | p1 | 13,529 ± 941 | 13,701 ± 932 | yes |
-| household_size | p2 | 11,670 ± 753 | 11,498 ± 790 | yes |
-| household_size | p3 | 4,201 ± 416 | 4,012 ± 472 | yes |
-| household_size | p4 | 2,721 ± 340 | 2,665 ± 388 | yes |
-| household_size | p5_plus | 1,166 ± 271 | 1,089 ± 292 | yes |
-| tenure | owner | 15,753 ± 564 | 15,445 ± 856 | yes |
-| tenure | renter | 17,534 ± 648 | 17,520 ± 998 | yes |
-| structure | single | 13,905 ± 929 | 13,611 ± 814 | yes |
-| structure | units_2_4 | 8,556 ± 673 | 8,552 ± 662 | yes |
-| structure | units_5_19 | 5,589 ± 474 | 5,558 ± 605 | yes |
-| structure | units_20_plus | 5,128 ± 527 | 5,157 ± 507 | yes |
-| structure | mobile_other | 110 ± 530 | 87 ± 68 | yes |
+| age_group | a0_4 | 2,916 ± 393 | 2,985 ± 459 | yes |
+| age_group | a5_9 | 3,106 ± 412 | 3,092 ± 459 | yes |
+| age_group | a10_14 | 2,704 ± 367 | 2,811 ± 481 | yes |
+| age_group | a15_19 | 2,759 ± 310 | 2,756 ± 339 | yes |
+| age_group | a20_24 | 5,034 ± 510 | 4,919 ± 625 | yes |
+| age_group | a25_29 | 7,356 ± 719 | 7,441 ± 652 | yes |
+| age_group | a30_34 | 6,843 ± 630 | 6,810 ± 522 | yes |
+| age_group | a35_39 | 6,006 ± 587 | 6,005 ± 550 | yes |
+| age_group | a40_44 | 4,269 ± 466 | 4,232 ± 465 | yes |
+| age_group | a45_49 | 4,111 ± 535 | 4,167 ± 423 | yes |
+| age_group | a50_54 | 3,757 ± 435 | 3,730 ± 438 | yes |
+| age_group | a55_59 | 3,892 ± 422 | 3,943 ± 461 | yes |
+| age_group | a60_64 | 4,417 ± 461 | 4,347 ± 434 | yes |
+| age_group | a65_69 | 3,862 ± 447 | 3,845 ± 450 | yes |
+| age_group | a70_74 | 2,686 ± 350 | 2,695 ± 317 | yes |
+| age_group | a75_79 | 1,973 ± 345 | 1,990 ± 283 | yes |
+| age_group | a80_84 | 1,344 ± 337 | 1,380 ± 301 | yes |
+| age_group | a85_plus | 1,636 ± 306 | 1,706 ± 350 | yes |
+| age65_plus | yes | 11,501 ± 857 | 11,616 ± 772 | yes |
+| age65_plus | no | 57,173 ± 1,003 | 57,238 ± 1,774 | yes |
+| race_eth | white | 53,861 ± 959 | 53,375 ± 1,095 | yes |
+| race_eth | black | 5,807 ± 707 | 6,244 ± 716 | yes |
+| race_eth | asian | 2,549 ± 492 | 2,689 ± 471 | yes |
+| race_eth | other | 4,360 ± 587 | 4,394 ± 731 | yes |
+| race_eth | hispanic | 2,097 ± 417 | 2,152 ± 382 | yes |
+| education | lt_hs | 1,895 ± 497 | 1,839 ± 324 | yes |
+| education | hs | 8,021 ± 645 | 7,906 ± 682 | yes |
+| education | some_college | 11,266 ± 698 | 11,328 ± 878 | yes |
+| education | ba_plus | 30,971 ± 915 | 31,218 ± 1,298 | yes |
+| household_size | p1 | 13,603 ± 777 | 13,701 ± 932 | yes |
+| household_size | p2 | 11,694 ± 551 | 11,498 ± 790 | yes |
+| household_size | p3 | 4,172 ± 499 | 4,012 ± 472 | yes |
+| household_size | p4 | 2,709 ± 295 | 2,665 ± 388 | yes |
+| household_size | p5_plus | 1,159 ± 240 | 1,089 ± 292 | yes |
+| tenure | owner | 15,788 ± 631 | 15,445 ± 856 | yes |
+| tenure | renter | 17,550 ± 705 | 17,520 ± 998 | yes |
+| structure | single | 13,932 ± 813 | 13,611 ± 814 | yes |
+| structure | units_2_4 | 8,589 ± 587 | 8,552 ± 662 | yes |
+| structure | units_5_19 | 5,576 ± 534 | 5,558 ± 605 | yes |
+| structure | units_20_plus | 5,131 ± 485 | 5,157 ± 507 | yes |
+| structure | mobile_other | 110 ± 506 | 87 ± 68 | yes |
 
 ## 3. Held-out blocks
 
@@ -108,7 +114,7 @@ The validation run hides 2020 Census counts for a random 20% of blocks with hous
 
 | measure | held-out blocks | correlation (model) | correlation (land-area baseline) | mean abs error, pct points (model) | mean abs error, pct points (baseline) |
 |---|---|---|---|---|---|
-| population | 162 | 0.83 | 0.68 | 2.17 | 3.50 |
+| population | 162 | 0.84 | 0.68 | 2.18 | 3.50 |
 | housing_units | 162 | 0.84 | 0.64 | 1.75 | 3.90 |
 
 ## 4. Uncertainty
@@ -117,16 +123,16 @@ Every estimate is the average of 21 placements of the main run, so a parcel show
 
 | level | areas | median CV, households | median CV, people | median CV, people 65+ | households high | medium | low |
 |---|---|---|---|---|---|---|---|
-| parcel | 16,955 | 0.22 | 0.51 | 1.70 | 39% | 35% | 25% |
-| block | 808 | 0.09 | 0.11 | 0.49 | 78% | 18% | 4% |
+| parcel | 16,955 | 0.22 | 0.50 | 1.67 | 40% | 36% | 25% |
+| block | 808 | 0.09 | 0.11 | 0.48 | 77% | 19% | 4% |
 | block_group | 61 | 0.07 | 0.03 | 0.28 | 100% | 0% | 0% |
-| tract | 20 | 0.04 | 0.01 | 0.17 | 100% | 0% | 0% |
-| city | 1 | 0.01 | 0.00 | 0.04 | 100% | 0% | 0% |
+| tract | 20 | 0.04 | 0.01 | 0.18 | 100% | 0% | 0% |
+| city | 1 | 0.01 | 0.00 | 0.05 | 100% | 0% | 0% |
 
 ## 5. Fit and placement diagnostics
 
-- Block-group fits converged: 100%; median iterations 11.
-- Households placed on a parcel of their own structure type: 80.4%; nearest type: 14.4%; beyond parcel unit counts (flagged): 5.2%.
+- Block-group fits converged: 100%; median iterations 12.
+- Households placed on a parcel of their own structure type: 80.3%; nearest type: 14.4%; beyond parcel unit counts (flagged): 5.3%.
 - Parcels with housing units: 16,955; given units only by fallback: 1.
 - Group-quarters residents: 1,959 synthetic vs 1,959 ACS. The ACS figure is total population minus household population, so it carries the error of both.
 

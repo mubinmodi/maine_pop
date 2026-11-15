@@ -30,7 +30,7 @@ CATALOG_PATH = ROOT / "config" / "variables.yaml"
 BG_IN = ["230050001001", "230050001002"]
 BG_OUT = "230050002001"
 TRACT = "23005000100"
-TABLE_WIDTH = {"B01001": 49, "B03002": 21, "B11016": 16, "B15003": 25, "B25002": 3, "B25008": 3, "B25032": 23}
+TABLE_WIDTH = {"B01001": 49, "B03002": 21, "B11016": 16, "B15003": 25, "B23025": 7, "C17002": 8, "B25002": 3, "B25008": 3, "B25032": 23}
 
 
 def _shapefile_zip(gdf: gpd.GeoDataFrame, path: Path) -> None:
@@ -102,6 +102,7 @@ def build_fixtures(root: Path) -> Path:
         "AGEP": [72, 34, 31, 45, 12, 2, 88, 50], "SEX": [2, 1, 2, 1, 2, 1, 2, 1],
         "RAC1P": [1, 2, 1, 6, 6, 6, 1, 1], "HISP": [1, 1, 2, 1, 1, 1, 1, 1],
         "SCHL": [14, 21, 19, 16, 9, None, 12, 16], "RELSHIPP": [20, 20, 21, 20, 25, 25, 37, 20],
+        "POVPIP": [250, 90, 90, 150, 150, 150, None, 300], "ESR": [6, 1, 3, 1, None, None, 6, 1],
         **{f"PWGTP{r}": [50, 60, 60, 40, 40, 40, 30, 99] for r in range(1, 81)},
     })
     for name, df, member in (("pums_households", h, "psam_h23.csv"), ("pums_persons", p, "psam_p23.csv")):

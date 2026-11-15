@@ -4,7 +4,7 @@ One container on Fargate behind an HTTPS load balancer. ECS Express Mode creates
 
 ```
 Browser ──HTTPS──▶ Load balancer (Express Mode) ──▶ Fargate task, ARM64
-   basic auth                                      FastAPI + app + data/out (35 MB)
+   basic auth                                      FastAPI + app + data/out (78 MB)
                                                      │
                                                      ├──▶ S3: datapoints.yaml (saved data points)
                                                      └──◀ Secrets Manager: SYNTHPOP_PASSWORD

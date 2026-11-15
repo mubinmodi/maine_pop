@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import io
 import json
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +28,7 @@ import pandas as pd
 from .catalog import Catalog
 from .config import ROOT
 from .datapoints import PRESETS, DataPointEngine, DataPointStore, RiskModel
+from .households import place
 from .publish import risk_factors
 from .summarize import TOTALS
 
@@ -75,6 +77,10 @@ class Atlas:
         self.engine = engine
         self.store = store
         self._people: bytes | None = None
+        self._runs: list[dict] | None = None
+        self._shared: tuple | None = None
+        self._run_cache: OrderedDict[str, bytes] = OrderedDict()
+        self._slots: pd.DataFrame | None = None
 
     @classmethod
     def open(cls, out_dir: str | Path, catalog: Catalog,
@@ -197,35 +203,89 @@ class Atlas:
 
     # ------------------------------------------------------------------ people
 
-    def people(self) -> bytes:
-        """The main run's synthetic persons as one columnar JSON document, built once.
-        Each attribute is a list of codes into that variable's schema categories (-1 for
-        blank), so the app can colour, filter and apply risk models with no more requests."""
-        if self._people is None:
-            path = self.out / "people.parquet"
-            if not path.exists():
-                raise KeyError("no people published; run `synthpop publish`")
-            p = pd.read_parquet(path)
-            attrs = [v.id for v in self.catalog.active if v.id in p.columns]
-            codes = {}
-            for a in attrs:
-                index = {c: i for i, c in enumerate(self.catalog.variable(a).category_ids)}
-                codes[a] = p[a].astype(str).map(index).fillna(-1).astype(int).tolist()
-            parcels, parcel_code = np.unique(p["parcel_id"].to_numpy(dtype=str), return_inverse=True)
-            blocks, block_code = np.unique(p["block"].to_numpy(dtype=str), return_inverse=True)
-            body = {
-                "count": len(p), "lon": p["lon"].tolist(), "lat": p["lat"].tolist(),
-                "age": p["age"].fillna(-1).astype(int).tolist(), "u": p["u"].tolist(),
-                "household": p["household_id"].tolist(),
-                "family": p["family_id"].fillna(-1).astype(int).tolist() if "family_id" in p else [-1] * len(p),
-                "parcel": parcel_code.tolist(), "parcels": parcels.tolist(),
-                # Block ids start with their block group (12 digits) and tract (11), so one code covers every level.
-                "block": block_code.tolist(), "blocks": blocks.tolist(),
-                "fallback": (p["location"] == "parcel").astype(int).tolist(),
-                "attributes": attrs, "codes": codes,
-            }
-            self._people = json.dumps(body, separators=(",", ":")).encode()
-        return self._people
+    def people(self, run: str | None = None) -> bytes:
+        """One run's synthetic persons as one columnar JSON document (the main run unless
+        `run` names another). Each attribute is a list of codes into that variable's schema
+        categories (-1 for blank), so the app can colour, filter and apply risk models with
+        no more requests. The main run is built once; the last few other runs are cached."""
+        if run in (None, "", "main"):
+            if self._people is None:
+                path = self.out / "people.parquet"
+                if not path.exists():
+                    raise KeyError("no people published; run `synthpop publish`")
+                self._people = self._people_body(pd.read_parquet(path))
+            return self._people
+        if run not in {r["name"] for r in self.people_runs()}:
+            raise KeyError(f"no run {run!r}")
+        if run in self._run_cache:
+            self._run_cache.move_to_end(run)
+            return self._run_cache[run]
+        body = self._people_body(self._run_frame(run))
+        self._run_cache[run] = body
+        while len(self._run_cache) > 8:
+            self._run_cache.popitem(last=False)
+        return body
+
+    def _run_frame(self, run: str) -> pd.DataFrame:
+        """A run's persons rebuilt from people_runs/: the run's own columns joined to the
+        shared seed people, map points and u stream (see publish_people_runs)."""
+        d = self.out / "people_runs"
+        if self._shared is None:
+            self._shared = (pd.read_parquet(d / "seeds.parquet").set_index("seed"),
+                            pd.read_parquet(d / "points.parquet").set_index("point"),
+                            pd.read_parquet(d / "u.parquet")["u"].to_numpy())
+        seeds, points, u = self._shared
+        f = pd.read_parquet(d / f"{run}.parquet")
+        p = pd.concat([f[["household_id"]], seeds.loc[f["seed"]].reset_index(drop=True),
+                       points.loc[f["point"]].reset_index(drop=True)], axis=1)
+        p["family_id"] = p["household_id"].where(f["in_family"].to_numpy())
+        p["u"] = u[:len(p)]
+        return p
+
+    def people_runs(self) -> list[dict]:
+        """The runs the app can play, in order (main, placement draws, replicates,
+        validation), each with its kind and how many people and households it has."""
+        if self._runs is None:
+            path = self.out / "people_runs" / "index.json"
+            self._runs = json.loads(path.read_text()) if path.exists() else [{"name": "main", "kind": "main"}]
+        return self._runs
+
+    def household_slots(self) -> pd.DataFrame | None:
+        if self._slots is None:
+            path = self.out / "household_slots.parquet"
+            self._slots = pd.read_parquet(path) if path.exists() else pd.DataFrame()
+        return self._slots if len(self._slots) else None
+
+    def _people_body(self, p: pd.DataFrame) -> bytes:
+        attrs = [v.id for v in self.catalog.active if v.id in p.columns]
+        codes = {}
+        for a in attrs:
+            index = {c: i for i, c in enumerate(self.catalog.variable(a).category_ids)}
+            codes[a] = p[a].astype(str).map(index).fillna(-1).astype(int).tolist()
+        parcels, parcel_code = np.unique(p["parcel_id"].to_numpy(dtype=str), return_inverse=True)
+        blocks, block_code = np.unique(p["block"].to_numpy(dtype=str), return_inverse=True)
+        unit, u = place(p, self.household_slots())
+        body = {
+            "count": len(p), "lon": p["lon"].tolist(), "lat": p["lat"].tolist(),
+            "age": p["age"].fillna(-1).astype(int).tolist(),
+            # Income as % of the poverty line (-1 where poverty status is not determined).
+            "poverty_ratio": p["poverty_ratio"].fillna(-1).astype(int).tolist() if "poverty_ratio" in p else [-1] * len(p),
+            "u": p["u"].astype(float).round(4).tolist(),
+            "household": p["household_id"].astype(int).tolist(),
+            "family": p["family_id"].fillna(-1).astype(int).tolist() if "family_id" in p else [-1] * len(p),
+            "parcel": parcel_code.tolist(), "parcels": parcels.tolist(),
+            # Block ids start with their block group (12 digits) and tract (11), so one code covers every level.
+            "block": block_code.tolist(), "blocks": blocks.tolist(),
+            "fallback": (p["location"] == "parcel").astype(int).tolist(),
+            "attributes": attrs, "codes": codes,
+            # 1 for the householder, who names the household's colour on the map.
+            "head": p["head"].astype(int).tolist() if "head" in p else [0] * len(p),
+            # Households (and each parcel's group-quarters residents) as circles spread over
+            # their parcel: each person's unit, and each unit's centre and radius in metres.
+            "unit": unit.tolist(),
+            "units": {"lon": u["lon"].round(6).tolist(), "lat": u["lat"].round(6).tolist(), "r": np.maximum(np.floor(u["r"].to_numpy() * 10) / 10, 0.3).tolist()},
+        }
+        return json.dumps(body, separators=(",", ":")).encode()
 
     # ------------------------------------------------------------------ data points
 

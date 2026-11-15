@@ -96,7 +96,8 @@ def test_everyone_counts_including_people_with_a_blank_factor(built, catalog, tm
     halved = (0.5 / 9) / (1 + 0.5 / 9)                         # odds 1/9 times 0.5, as a probability
     city = engine.compute(flat, "city").iloc[0]
     assert city["estimate"] == pytest.approx(0.1 * (people - ba) + halved * ba, rel=1e-9)
-    assert sum(r["universe"] for r in engine.breakdown(flat)["sex"]) == pytest.approx(people)
+    # the API rounds each category's universe to 0.1
+    assert sum(r["universe"] for r in engine.breakdown(flat)["sex"]) == pytest.approx(people, abs=0.1)
 
 
 def test_cases_add_up_across_levels_and_universe_limits_shares(built, catalog):
