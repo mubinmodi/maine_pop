@@ -28,6 +28,7 @@ export function openEditor(el: HTMLElement, schema: Schema, initial: RiskModel, 
   const ages = factors.find((f) => f.id === "age_group")?.categories ?? [];
   const lq = factors.find((f) => f.id === "living_quarters");
   let idEdited = isSaved;
+  const calibration = initial.calibrate ?? "";     // kept, so the checkbox can turn it back on
 
   const minAge = () => {
     const u = model.universe.age_group;
@@ -80,6 +81,11 @@ export function openEditor(el: HTMLElement, schema: Schema, initial: RiskModel, 
         <span class="or-val" id="dp-base-val">${pct(model.baseline)}</span>
       </div>
       <p class="hint" id="dp-ref">Reference person: ${esc(referenceText())}.</p>
+      ${calibration ? `<label class="check"><input type="checkbox" id="dp-cal" ${model.calibrate ? "checked" : ""}>
+        Match the CDC PLACES rate in every tract</label>
+      <p class="hint">When on, each tract's expected adults with the condition equal PLACES' rate for that tract
+        (adults 18+), so the baseline has no effect: the odds ratios only spread risk among people within a tract.
+        PLACES' own uncertainty is added to the margins.</p>` : ""}
     </section>
     <section>
       <h3>Odds ratios</h3>
@@ -122,6 +128,14 @@ export function openEditor(el: HTMLElement, schema: Schema, initial: RiskModel, 
     if (v === "all") delete model.universe.living_quarters; else model.universe.living_quarters = [v];
     changed();
   });
+  const syncCal = () => { $<HTMLInputElement>("#dp-base").disabled = !!model.calibrate; };
+  el.querySelector<HTMLInputElement>("#dp-cal")?.addEventListener("change", (e) => {
+    model.calibrate = (e.target as HTMLInputElement).checked ? calibration : "";
+    if (!model.calibrate) delete model.offsets;
+    syncCal();
+    changed();
+  });
+  syncCal();
   $<HTMLInputElement>("#dp-base").oninput = (e) => {
     model.baseline = +fromSlider(+(e.target as HTMLInputElement).value, P_MIN, P_MAX).toPrecision(3);
     $("#dp-base-val").textContent = pct(model.baseline);
@@ -209,6 +223,7 @@ function renderResult(el: HTMLElement, p: Preview, schema: Schema, model: RiskMo
       <div><b>${pct(c.share)}</b><span class="moe"> ± ${pct(Z * c.share_se)}</span>
         <div class="hint">of ${esc(who)}</div></div>
     </div>
-    <p class="hint">90% margins from the synthetic population's placement and survey uncertainty. They don't include uncertainty in the odds ratios themselves.</p>
+    <p class="hint">90% margins from the synthetic population's placement and survey uncertainty${p.model.calibrate ? ", and CDC PLACES' own interval for each tract" : ""}. They don't include uncertainty in the odds ratios themselves.</p>
+    ${p.model.offsets_error ? `<p class="hint warn">${esc(p.model.offsets_error)}</p>` : ""}
     ${charts}`;
 }

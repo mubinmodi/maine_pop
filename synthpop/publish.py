@@ -240,6 +240,17 @@ def publish_household_slots(frames, parcels, out_dir: str | Path) -> int:
     return len(table)
 
 
+def publish_places(data: dict, out_dir: str | Path) -> int:
+    """places.parquet: CDC PLACES crude prevalence (percent of adults) by tract and city,
+    for data points calibrated to it (datapoints.RiskModel.calibrate)."""
+    p = data.get("places")
+    if p is None or not len(p):
+        return 0
+    p = p[(p["value_type"] == "CrdPrv") & p["level"].isin(["tract", "city"])]
+    p[["level", "area_id", "measure", "estimate", "low", "high", "year"]].to_parquet(Path(out_dir) / "places.parquet", index=False)
+    return int((p["level"] == "tract").sum())
+
+
 def publish_cells(runs_dir: str | Path, catalog, out_dir: str | Path) -> dict[str, int]:
     """Per-run person counts by risk-factor cell, for computing data points live.
     Everyone is counted, including people with a blank factor (education under 25).

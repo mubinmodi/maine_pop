@@ -117,7 +117,7 @@ class Atlas:
                    "universe": None, "available": True, "categories": [{"id": "total", "label": v}]}
                   for k, v in TOTALS.items()]
         saved = [{"id": m.id, "label": m.label, "kind": "datapoint", "unit": "person", "universe": m.description,
-                  "available": True, "categories": [{"id": "yes", "label": m.label}], "model": m.to_dict()}
+                  "available": True, "categories": [{"id": "yes", "label": m.label}], "model": self._client_model(m)}
                  for m in self._saved.values()]
         factors = [{"id": f, "label": self.catalog.variable(f).label,
                     "categories": [{"id": c.id, "label": c.label} for c in self.catalog.variable(f).categories]}
@@ -127,7 +127,7 @@ class Atlas:
             "compare_with": COMPARE_WITH,
             "variables": totals + [v for v in base["variables"]] + saved,
             "datapoints": {"available": bool(self.engine and self.engine.available), "factors": factors,
-                           "presets": list(PRESETS.values())},
+                           "presets": [self._client_model(RiskModel.parse(p, self.catalog)) for p in PRESETS.values()]},
             "confidence": {"high": "CV ≤ 12%", "medium": "CV 12–40%", "low": "CV > 40%"},
             "disclosure": DISCLOSURE,
         }
@@ -301,10 +301,23 @@ class Atlas:
                 "city": {"estimate": round(float(city.estimate), 2), "se": round(float(city.se), 2),
                          "share": round(float(city.share), 5), "share_se": round(float(city.share_se), 5),
                          "confidence": city.confidence},
-                "breakdown": self.engine.breakdown(model), "model": model.to_dict()}
+                "breakdown": self.engine.breakdown(model), "model": self._client_model(model)}
+
+    def _client_model(self, model: RiskModel) -> dict:
+        """The model as the app gets it: with `offsets`, each tract's log-odds shift, when it is
+        calibrated, so the people layer marks cases the way the area figures count them."""
+        d = model.to_dict()
+        if model.calibrate and self.engine and self.engine.available:
+            try:
+                d["offsets"] = self.engine.offsets_by_tract(model)
+            except ValueError as e:
+                d["offsets_error"] = str(e)
+        return d
 
     def save_datapoint(self, raw: dict) -> dict:
         model = RiskModel.parse(raw, self.catalog)
+        if model.calibrate and self.engine and self.engine.available:
+            self.engine.offsets(model)       # raises as preview does (e.g. ages that leave out adults), before anything is written
         taken = {v.id for v in self.catalog.variables} | set(TOTALS)
         self.store.save(model, taken)
         return model.to_dict()
@@ -317,7 +330,10 @@ class Atlas:
         if not (self.engine and self.engine.available) or level not in COMPARE_WITH:
             return out
         for m in models:
-            f = self._datapoint_frame(m, level)
+            try:
+                f = self._datapoint_frame(m, level)
+            except ValueError:
+                continue                     # a model that cannot be computed here is left out, not fatal
             row = f[f["area_id"] == area_id]
             if len(row):
                 r = row.iloc[0]
@@ -404,8 +420,11 @@ class Atlas:
         stats = self._q(
             "SELECT area_id, variable || '.' || category AS col, estimate, se FROM stats "
             "WHERE level = ? AND source = 'synthetic'", [level]).fetchdf()
-        for m in self._saved.values():
-            f = self._datapoint_frame(m, level)
+        for m in self._saved.values() if self.engine and self.engine.available else []:
+            try:
+                f = self._datapoint_frame(m, level)
+            except ValueError:
+                continue                     # the demographic columns still export
             stats = pd.concat([stats, pd.DataFrame({"area_id": f["area_id"], "col": f"{m.id}.yes",
                                                     "estimate": f["estimate"], "se": f["se"]})], ignore_index=True)
         stats = stats[stats["area_id"].isin(set(areas["area_id"]))]
@@ -421,7 +440,8 @@ class Atlas:
             return buf.getvalue().encode(), "text/csv"
         if fmt == "geojson":
             geo = json.loads((self.out / "geo" / f"{level}.geojson").read_text())
-            props = table.set_index("area_id").where(table.set_index("area_id").notna(), None).to_dict("index")
+            t = table.set_index("area_id")
+            props = t.astype(object).where(t.notna(), None).to_dict("index")   # NaN is not JSON: write null
             feats = [{"type": "Feature", "geometry": f["geometry"], "properties": {"area_id": f["properties"]["id"],
                       **props[f["properties"]["id"]]}} for f in geo["features"] if f["properties"]["id"] in props]
             body = {"type": "FeatureCollection", "disclosure": DISCLOSURE, "features": feats}

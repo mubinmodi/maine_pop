@@ -39,6 +39,19 @@ describe("Population", () => {
     expect(p.draftId()).toBeNull();
   });
 
+  it("shifts a calibrated data point's risk by each person's tract, and keeps the shifts while the draft changes", () => {
+    const p = pop();
+    // Tract 23005000200 (block 1: people 4, 5, 6) is pushed to certain risk, the other tract to none.
+    const offsets = { "23005000100": -30, "23005000200": 30 };
+    p.setDraft({ ...womenOnly, universe: {}, baseline: 0.5, calibrate: "places:DIABETES", offsets });
+    const d = () => Array.from({ length: 8 }, (_, i) => p.dim("dp:__draft")!.code(i));
+    expect(d()).toEqual([1, 1, 1, 1, 0, 0, 0, 1]);
+    p.setDraft({ ...womenOnly, universe: {}, baseline: 0.1, calibrate: "places:DIABETES" });   // no offsets yet
+    expect(d()).toEqual([1, 1, 1, 1, 0, 0, 0, 1]);
+    p.setDraft({ ...womenOnly, universe: {}, baseline: 0.5, calibrate: "", offsets });         // calibration off
+    expect(d()).not.toEqual([1, 1, 1, 1, 0, 0, 0, 1]);
+  });
+
   it("reapplies data points when another run's people come in, and says so through version", () => {
     const p = pop(), before = p.version;
     const next = people();
@@ -65,10 +78,10 @@ describe("Population", () => {
 
   it("writes the person table's columns as CSV, with a column per data point", () => {
     const [header, row4] = pop().csv([4]).trim().split("\n");
-    expect(header.split(",").slice(0, 11)).toEqual(["person_id", "family_id", "parcel_id", "AGE", "SEX", "RACE", "EDUCATION",
-      "POVERTY", "POVERTY_RATIO", "EMPLOYMENT", "household_id"]);
+    expect(header.split(",").slice(0, 13)).toEqual(["person_id", "family_id", "parcel_id", "AGE", "SEX", "RACE", "EDUCATION",
+      "POVERTY", "POVERTY_RATIO", "EMPLOYMENT", "DISABILITY", "HEALTH_INSURANCE", "household_id"]);
     expect(header.endsWith(",test_dp")).toBe(true);
-    expect(row4.split(",")).toEqual(["4", "", "076 A039", "85", "female", "", "", "", "", "", "", "230050002001000", "-70.27", "43.65", "address", "1"]);
+    expect(row4.split(",")).toEqual(["4", "", "076 A039", "85", "female", "", "", "", "", "", "", "", "", "230050002001000", "-70.27", "43.65", "address", "1"]);
   });
 
   it("summarises an area from its people", () => {

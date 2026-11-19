@@ -142,7 +142,7 @@ def cmd_publish(args) -> None:
 
     import pandas as pd
 
-    from .publish import publish, publish_cells, publish_people, publish_people_runs
+    from .publish import publish, publish_cells, publish_people, publish_people_runs, publish_places
 
     sources = _sources(args)
     data = sources.load_all()
@@ -155,6 +155,7 @@ def cmd_publish(args) -> None:
     print(f"published people from {n} runs for the simulation player")
     cells = publish_cells(Path(args.data) / "runs", sources.catalog, Path(args.data) / "out")
     print(f"published risk-factor cells from {cells['draws']} draws and {cells['replicates']} replicates")
+    print(f"published CDC PLACES rates for {publish_places(data, Path(args.data) / 'out')} tract-measures")
 
 
 def cmd_build(args) -> None:

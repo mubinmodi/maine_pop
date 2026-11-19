@@ -10,9 +10,9 @@ from synthpop.api import create_app
 from synthpop.atlas import Atlas, Filter
 from synthpop.datapoints import PRESETS, DataPointEngine, DataPointStore, RiskModel
 from synthpop.model import Run
-from synthpop.publish import publish, publish_cells
+from synthpop.publish import publish, publish_cells, publish_places, risk_factors
 from synthpop.summarize import RunData, published, summarize
-from conftest import AREA, CATALOG_PATH
+from conftest import AREA, CATALOG_PATH, TRACT
 
 DIABETES = {
     "id": "diabetes", "label": "Diabetes (test model)", "baseline": 0.05,
@@ -41,6 +41,7 @@ def built(sources, catalog, tmp_path):
     pd.concat([stats, published(data["acs"], catalog)]).to_parquet(out / "area_stats.parquet", index=False)
     publish(data, placed["main"].capacity, AREA, out)
     publish_cells(runs_dir, catalog, out)
+    publish_places(data, out)
     return out, placed
 
 
@@ -59,6 +60,106 @@ def test_dhana_preset_parses(catalog):
     m = RiskModel.parse(PRESETS["alzheimers_dhana"], catalog)
     assert m.odds_ratios["age_group"]["a85_plus"] == 14.78
     assert 0.02 < m.baseline < 0.05
+
+
+def test_diabetes_preset_parses_with_published_ratios(catalog):
+    m = RiskModel.parse(PRESETS["diabetes_places"], catalog)
+    assert m.calibrate == "places:DIABETES"
+    assert m.odds_ratios["age_group"]["a40_44"] == pytest.approx((0.121 / 0.879) / (0.022 / 0.978), rel=1e-3)
+    assert m.odds_ratios["sex"]["female"] < 1 and m.odds_ratios["race_eth"]["black"] > 1
+    with pytest.raises(ValueError, match="calibrate"):
+        RiskModel.parse({**DIABETES, "calibrate": "nhanes:x"}, catalog)
+
+
+def test_diabetes_preset_matches_places_for_the_fixture_tract(built, catalog):
+    out, placed = built
+    engine = DataPointEngine(out, catalog, AREA.place_geoid)
+    m = RiskModel.parse(PRESETS["diabetes_places"], catalog)
+    adult_bands = m.universe["age_group"]
+    ages = [placed[n].persons["age_group"] for n in ("main", "draw_01", "draw_02")]
+    adults = np.mean([a.isin(adult_bands).sum() + 0.4 * (a == "a15_19").sum() for a in ages])
+    tract = engine.compute(m, "tract").set_index("area_id").loc[TRACT]
+    assert tract["estimate"] == pytest.approx(0.081 * adults, rel=1e-6)     # the fixture tract's PLACES rate is 8.1%
+    # Levels still add up, and the city is its tracts.
+    totals = [engine.compute(m, lvl)["estimate"].sum() for lvl in ("parcel", "block", "block_group", "tract", "city")]
+    np.testing.assert_allclose(totals, totals[0], rtol=1e-9)
+    # The baseline no longer sets the level; the odds ratios still spread it.
+    other = RiskModel.parse({**PRESETS["diabetes_places"], "baseline": 0.2}, catalog)
+    assert engine.compute(other, "tract")["estimate"].iloc[0] == pytest.approx(tract["estimate"], rel=1e-6)
+    by_age = {r["category"]: r["rate"] for r in engine.breakdown(m)["age_group"]}
+    assert by_age["a70_74"] > by_age["a30_34"]
+    # The margin includes PLACES' own error: its 95% interval is 7.0–9.4%.
+    assert tract["se"] >= (9.4 - 7.0) / 3.92 / 100 * adults - 1e-9
+    assert set(engine.offsets_by_tract(m)) == {TRACT}
+
+
+@pytest.mark.parametrize("odds_ratio", [1.0, 0.1, 20.0], ids=["neutral", "lower-sliders", "raise-sliders"])
+def test_places_targets_survive_odds_ratio_slider_changes(tmp_path, catalog, odds_ratio):
+    # Both tracts contain 100 adults, with known targets of 8 and 19 cases.
+    rates = {TRACT: 8.0, "23005000200": 19.0}
+    cells = []
+    for index, tract in enumerate(rates):
+        for sex, count in (("female", 25 + 50 * index), ("male", 75 - 50 * index)):
+            cells.append({
+                **dict.fromkeys(risk_factors(catalog)),
+                "age_group": "a40_44", "sex": sex, "education": "ba_plus",
+                "run": 0, "n": count, "parcel_id": f"{tract}-{sex}",
+                "block": f"{tract}100{len(cells)}", "block_group": f"{tract}1",
+            })
+    pd.DataFrame(cells).to_parquet(tmp_path / "cells_draws.parquet")
+    pd.DataFrame([
+        {"level": "tract", "area_id": tract, "measure": "DIABETES", "estimate": rate,
+         "low": rate - 1, "high": rate + 1}
+        for tract, rate in rates.items()
+    ]).to_parquet(tmp_path / "places.parquet")
+
+    engine = DataPointEngine(tmp_path, catalog, AREA.place_geoid)
+    risk = RiskModel.parse({
+        **PRESETS["diabetes_places"],
+        "odds_ratios": {
+            "sex": {"male": odds_ratio, "female": odds_ratio},
+            "education": {"ba_plus": odds_ratio},
+        },
+    }, catalog)
+
+    estimates = engine.compute(risk, "tract").set_index("area_id")["estimate"].to_dict()
+    assert estimates == pytest.approx(rates, abs=1e-6)
+    assert engine.compute(risk, "city")["estimate"].iloc[0] == pytest.approx(27, abs=1e-6)
+
+
+def test_save_rejects_invalid_calibration_and_preserves_the_saved_model(built, tmp_path):
+    out, _ = built
+    path = tmp_path / "datapoints.yaml"
+    client = TestClient(create_app(out, CATALOG_PATH, datapoints_path=path))
+    valid = PRESETS["diabetes_places"]
+    invalid = {**valid, "universe": {"age_group": ["a85_plus"]}}
+
+    assert client.post("/api/datapoints", json=valid).status_code == 200
+    original = path.read_bytes()
+    preview = client.post("/api/datapoints/preview", json={"model": invalid, "level": "tract"})
+    assert preview.status_code == 400 and "adults" in preview.json()["detail"]
+    saved = client.post("/api/datapoints", json=invalid)
+
+    assert saved.status_code == 400, saved.text
+    assert path.read_bytes() == original
+    detail = client.get(f"/api/areas/tract/{TRACT}")
+    assert detail.status_code == 200 and valid["id"] in detail.json()["values"]
+    export = client.get("/api/export", params={"level": "tract", "format": "csv"})
+    assert export.status_code == 200 and f'{valid["id"]}.yes' in export.text
+
+
+@pytest.mark.parametrize("change", [{"baseline": 0.0001}, {"baseline": 0.99},
+                                    {"odds_ratios": {"sex": {"female": 999.0}}}])
+def test_calibration_holds_for_extreme_baselines_and_odds_ratios(built, catalog, change):
+    # Newton from δ = 0 used to overshoot to the ±20 clip, where the slope is ~0, and stop there.
+    out, _ = built
+    engine = DataPointEngine(out, catalog, AREA.place_geoid)
+    raw = {**PRESETS["diabetes_places"], **{k: v for k, v in change.items() if k != "odds_ratios"}}
+    if "odds_ratios" in change:
+        raw["odds_ratios"] = {**raw["odds_ratios"], **change["odds_ratios"]}
+    m = RiskModel.parse(raw, catalog)
+    target = engine.places["DIABETES"]["prev"].to_numpy() * engine._tract_adults
+    np.testing.assert_allclose(engine.compute(m, "tract")["estimate"].to_numpy(), target, rtol=1e-6)
 
 
 def test_expected_cases_match_a_brute_force_sum(built, catalog):

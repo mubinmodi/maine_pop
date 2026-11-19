@@ -8,7 +8,12 @@ computed live and optionally saved.
 
 A risk model gives every synthetic person a probability:
 
-    logit p = logit(baseline) + Σ log(odds ratio of the person's category, per factor)
+    logit p = logit(baseline) + Σ log(odds ratio of the person's category, per factor) [+ δ_tract]
+
+A model with `calibrate: places:<MEASURE>` gets one shift δ per tract, chosen so the
+tract's expected cases equal its CDC PLACES prevalence times its adults (18+). The odds
+ratios then only spread risk within a tract, and the tract's total follows PLACES.
+PLACES' own uncertainty (its 95% interval) is added to the margins of such a model.
 
 `baseline` is the prevalence for the reference person (every factor at a category
 with no odds ratio). People outside the universe get p = 0 and are not counted
@@ -38,6 +43,11 @@ from .store import Document
 from .summarize import confidence
 
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
+CALIBRATE_PATTERN = re.compile(r"^places:[A-Z0-9_]{2,40}$")
+# PLACES rates are for adults 18+. Ages are in 5-year groups, so 18 and 19 are taken as
+# two fifths of the 15–19 group.
+ADULT_WEIGHT = {"a15_19": 0.4, **{a: 1.0 for a in ("a20_24", "a25_29", "a30_34", "a35_39", "a40_44", "a45_49",
+                "a50_54", "a55_59", "a60_64", "a65_69", "a70_74", "a75_79", "a80_84", "a85_plus")}}
 
 
 @dataclass
@@ -49,6 +59,7 @@ class RiskModel:
     universe: dict[str, list[str]] = field(default_factory=dict)   # factor -> categories counted
     description: str = ""
     source: str = ""
+    calibrate: str = ""                              # "places:DIABETES": match CDC PLACES by tract
 
     @classmethod
     def parse(cls, raw: dict, catalog: Catalog) -> "RiskModel":
@@ -56,7 +67,10 @@ class RiskModel:
         m = cls(id=str(raw["id"]), label=str(raw.get("label") or raw["id"]), baseline=float(raw["baseline"]),
                 odds_ratios={f: {c: float(v) for c, v in cats.items()} for f, cats in (raw.get("odds_ratios") or {}).items()},
                 universe={f: [str(c) for c in cats] for f, cats in (raw.get("universe") or {}).items()},
-                description=str(raw.get("description", "")), source=str(raw.get("source", "")))
+                description=str(raw.get("description", "")), source=str(raw.get("source", "")),
+                calibrate=str(raw.get("calibrate") or ""))
+        if m.calibrate and not CALIBRATE_PATTERN.match(m.calibrate):
+            raise ValueError("calibrate must be empty or places:<MEASURE>, e.g. places:DIABETES")
         if not ID_PATTERN.match(m.id):
             raise ValueError("id must be lower_snake_case, 2–41 characters, starting with a letter")
         if not 0 < m.baseline < 1:
@@ -80,16 +94,50 @@ class RiskModel:
     def key(self) -> str:
         return hashlib.sha1(json.dumps(self.to_dict(), sort_keys=True).encode()).hexdigest()
 
-    def probabilities(self, cells: pd.DataFrame) -> pd.DataFrame:
-        """`cells` has one column per factor; returns it with p and in_universe (0/1)."""
+    def logits(self, cells: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+        """Each cell's log-odds (before any tract shift) and whether it is in the universe."""
         logit = np.full(len(cells), math.log(self.baseline / (1 - self.baseline)))
         for f, cats in self.odds_ratios.items():
             logit += cells[f].map({c: math.log(v) for c, v in cats.items()}).fillna(0.0).to_numpy()
         inside = np.ones(len(cells), dtype=bool)
         for f, cats in self.universe.items():
             inside &= cells[f].isin(cats).to_numpy()
-        p = 1 / (1 + np.exp(-logit))
-        return cells.assign(p=np.where(inside, p, 0.0), in_universe=inside.astype(float))
+        return logit, inside
+
+    def probabilities(self, cells: pd.DataFrame) -> pd.DataFrame:
+        """`cells` has one column per factor; returns it with p and in_universe (0/1),
+        without any tract shift."""
+        logit, inside = self.logits(cells)
+        return cells.assign(p=np.where(inside, _expit(logit), 0.0), in_universe=inside.astype(float))
+
+
+def _expit(x):
+    return 1 / (1 + np.exp(-np.clip(x, -40, 40)))
+
+
+def _solve_shift(N: np.ndarray, logit: np.ndarray, target: np.ndarray, bound: float = 60.0) -> np.ndarray:
+    """For each row t of N (people by cell), the δ with Σ_c N_tc·expit(logit_c + δ) = target_t.
+
+    The sum rises with δ, so each root is bracketed in [−bound, bound] and the bracket
+    shrinks every step. A Newton step is taken when it lands inside the bracket, else
+    the midpoint: plain Newton from 0 can jump to where the slope is ~0 and stall there.
+    """
+    lo, hi = np.full(len(target), -bound), np.full(len(target), bound)
+    delta = np.zeros(len(target))
+    tol = 1e-9 * np.maximum(target, 1.0)
+    for _ in range(200):
+        q = _expit(logit[None, :] + delta[:, None])
+        f = (N * q).sum(1) - target
+        g = (N * q * (1 - q)).sum(1)
+        done = np.abs(f) <= tol
+        if done.all():
+            break
+        hi = np.where(f > 0, delta, hi)
+        lo = np.where(f < 0, delta, lo)
+        newton = delta - np.divide(f, g, out=np.full_like(f, np.inf), where=g > 0)
+        inside = (newton > lo) & (newton < hi)
+        delta = np.where(done, delta, np.where(inside, newton, (lo + hi) / 2))
+    return delta
 
 
 # Alzheimer's disease dementia, from Dhana et al. 2023 (Alzheimer's & Dementia 19:4388), Table 1:
@@ -118,7 +166,40 @@ def _dhana() -> dict:
     }
 
 
-PRESETS = {"alzheimers_dhana": _dhana()}
+# Diagnosed diabetes. Published prevalences turned into odds ratios against a reference
+# category; the tract shift (calibrate) then sets each tract's level from CDC PLACES.
+# - Age and sex: NCHS Data Brief 516 (NHANES Aug 2021–Aug 2023), diagnosed diabetes in
+#   adults 20+: 2.2% at 20–39, 12.1% at 40–59, 20.5% at 60+; men 12.9%, women 9.7%.
+# - Race/ethnicity and education: National Diabetes Statistics Report, Appendix Table 3
+#   (NHIS 2019–2021, age-adjusted): White 6.9%, Black 12.1%, Asian 9.1%, Hispanic 11.7%;
+#   less than high school 13.1%, high school 9.1%, more than high school 6.9%.
+# Marginal rates used as if they were adjusted for each other overstate the combined
+# gradient somewhat; income is left out because education already carries most of it.
+def _diabetes() -> dict:
+    odds = lambda p: p / (1 - p)
+    ratio = lambda p, ref: round(odds(p) / odds(ref), 3)
+    ages = {"a40_44": 0.121, "a45_49": 0.121, "a50_54": 0.121, "a55_59": 0.121,
+            **{a: 0.205 for a in ("a60_64", "a65_69", "a70_74", "a75_79", "a80_84", "a85_plus")}}
+    return {
+        "id": "diabetes_places", "label": "Diagnosed diabetes (CDC PLACES by tract)",
+        "baseline": 0.022,
+        "odds_ratios": {
+            "age_group": {a: ratio(p, 0.022) for a, p in ages.items()},
+            "sex": {"female": ratio(0.097, 0.129)},
+            "race_eth": {"black": ratio(0.121, 0.069), "asian": ratio(0.091, 0.069), "hispanic": ratio(0.117, 0.069)},
+            "education": {"lt_hs": ratio(0.131, 0.069), "hs": ratio(0.091, 0.069)},
+        },
+        "universe": {"age_group": list(ADULT_WEIGHT)[1:]},
+        "description": "Expected adults 20+ with diagnosed diabetes. Each tract's total matches CDC PLACES "
+                       "(2025 release, BRFSS 2023); age, sex, race/ethnicity and education spread it within the tract. "
+                       "Reference person: White man aged 20–39 with more than a high school education.",
+        "source": "CDC PLACES 2025 (tract crude prevalence); NCHS Data Brief 516 (2024), Figures 1–2; "
+                  "CDC National Diabetes Statistics Report, Appendix Table 3 (2019–2021).",
+        "calibrate": "places:DIABETES",
+    }
+
+
+PRESETS = {"alzheimers_dhana": _dhana(), "diabetes_places": _diabetes()}
 
 
 def _prefix(s: pd.Series, n: int) -> pd.Series:
@@ -198,6 +279,29 @@ class DataPointEngine:
         self._levels["parcel"]["parent"] = bg.get_indexer(parcel_bg.reindex(self._levels["parcel"]["areas"]))
         self._cell_people = np.bincount(cell_d, weights=n_d, minlength=len(uniq)) / self.n_draws
 
+        # Each area's tract, and people by (tract, cell), for tract-calibrated models.
+        tracts = self._levels["tract"]["areas"]
+        for level, lv in self._levels.items():
+            if level == "parcel":
+                lv["tract"] = np.where(lv["parent"] >= 0, tracts.get_indexer(bg[np.maximum(lv["parent"], 0)].str[:11]), -1)
+            elif level != "city":
+                lv["tract"] = tracts.get_indexer(lv["areas"].str[:11])
+        t = self._levels["tract"]["draws"]
+        n_t = t["shape"][1]
+        self._tract_cells = np.bincount((t["row"] % n_t) * len(uniq) + t["cell"], weights=t["n"],
+                                        minlength=n_t * len(uniq)).reshape(n_t, len(uniq)) / self.n_draws
+        adult = self.cells["age_group"].map(ADULT_WEIGHT).fillna(0.0).to_numpy() if "age_group" in self.cells else np.ones(len(uniq))
+        self._tract_adults = self._tract_cells @ adult
+        self.places: dict[str, pd.DataFrame] = {}
+        if (out / "places.parquet").exists():
+            pl = pd.read_parquet(out / "places.parquet")
+            pl = pl[pl["level"] == "tract"]
+            for m, g in pl.groupby("measure"):
+                g = g.set_index("area_id")
+                self.places[m] = pd.DataFrame({"prev": g["estimate"] / 100,
+                                               "se": (g["high"] - g["low"]) / (2 * 1.96) / 100}).reindex(tracts)
+        self._offsets: dict[str, np.ndarray] = {}
+
     def _cell_codes(self, df: pd.DataFrame) -> np.ndarray:
         code = np.zeros(len(df), dtype=np.int64)
         for f in self.factors:
@@ -223,32 +327,101 @@ class DataPointEngine:
         return {"row": uniq // n_cells, "cell": uniq % n_cells, "n": np.bincount(inv, weights=n),
                 "shape": (n_runs, n_areas)}
 
+    def offsets(self, model: RiskModel) -> np.ndarray | None:
+        """The model's log-odds shift for each tract (in tract-area order), or None when it
+        is not calibrated. δ makes a tract's expected cases equal PLACES prevalence × adults."""
+        if not model.calibrate:
+            return None
+        with self._lock:
+            if model.key in self._offsets:
+                return self._offsets[model.key]
+        measure = model.calibrate.split(":", 1)[1]
+        if measure not in self.places:
+            raise ValueError(f"no CDC PLACES rates for {measure}; add it to PLACES_MEASURES and run "
+                             "`synthpop fetch --only places` then `synthpop publish`")
+        logit, inside = model.logits(self.cells)
+        N = self._tract_cells * inside[None, :]
+        adults = self._tract_adults
+        if (N.sum(1) < 0.9 * adults).any():
+            raise ValueError("a PLACES rate is for adults: the data point's ages must include every adult (20+)")
+        prev = self.places[measure]["prev"].to_numpy()
+        # A tract without a PLACES rate takes the rate of all the tracts that have one.
+        known = ~np.isnan(prev)
+        prev = np.where(known, prev, (prev[known] * adults[known]).sum() / max(adults[known].sum(), 1e-9))
+        target = prev * adults
+        delta = _solve_shift(N, logit, target)
+        with self._lock:
+            self._offsets[model.key] = delta
+        return delta
+
+    def _places_se(self, model: RiskModel) -> np.ndarray:
+        """PLACES standard error of each tract's expected cases."""
+        se = self.places[model.calibrate.split(":", 1)[1]]["se"].fillna(0.0).to_numpy()
+        return se * self._tract_adults
+
     @staticmethod
     def _per_run(c: dict, p: np.ndarray, inside: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Expected cases, people in the universe, and the rate, for each run and area."""
+        """Expected cases and people in the universe for each run and area; `p` and
+        `inside` are per entry of `c`."""
         size = c["shape"][0] * c["shape"][1]
-        cases = np.bincount(c["row"], weights=c["n"] * p[c["cell"]], minlength=size).reshape(c["shape"])
-        uni = np.bincount(c["row"], weights=c["n"] * inside[c["cell"]], minlength=size).reshape(c["shape"])
-        rate = np.divide(cases, uni, out=np.zeros_like(cases), where=uni > 0)
-        return cases, rate
+        cases = np.bincount(c["row"], weights=c["n"] * p, minlength=size).reshape(c["shape"])
+        uni = np.bincount(c["row"], weights=c["n"] * inside, minlength=size).reshape(c["shape"])
+        return cases, uni
 
-    def _level(self, level: str, p: np.ndarray, inside: np.ndarray) -> pd.DataFrame:
+    def _entries(self, level: str, c: dict, logit, inside, delta) -> tuple[np.ndarray, np.ndarray]:
+        x = logit[c["cell"]]
+        if delta is not None:
+            tract = self._levels[level]["tract"][c["row"] % c["shape"][1]]
+            x = x + np.where(tract >= 0, delta[np.maximum(tract, 0)], 0.0)
+        return np.where(inside[c["cell"]], _expit(x), 0.0), inside[c["cell"]].astype(float)
+
+    def _runs(self, level: str, kind: str, logit, inside, delta) -> tuple[np.ndarray, np.ndarray] | None:
+        """Cases and universe by (run, area). A calibrated city is the sum of its tracts."""
+        if delta is not None and level == "city":
+            r = self._runs("tract", kind, logit, inside, delta)
+            return None if r is None else (r[0].sum(1, keepdims=True), r[1].sum(1, keepdims=True))
         lv = self._levels[level]
-        cases, rate = self._per_run(lv["draws"], p, inside)
+        if kind not in lv:
+            return None
+        return self._per_run(lv[kind], *self._entries(level, lv[kind], logit, inside, delta))
+
+    def _level(self, level: str, logit, inside, delta=None) -> pd.DataFrame:
+        lv = self._levels[level]
+        rate = lambda cases, uni: np.divide(cases, uni, out=np.zeros_like(cases), where=uni > 0)
+        cases, uni = self._runs(level, "draws", logit, inside, delta)
+        share = rate(cases, uni)
         k = self.n_draws   # areas missing from a draw count as 0 in that draw
         out = pd.DataFrame({
-            "estimate": cases.mean(0), "share": rate.mean(0),
+            "estimate": cases.mean(0), "share": share.mean(0),
             "var_place": cases.var(0, ddof=1) if k > 1 else 0.0,
-            "var_place_s": rate.var(0, ddof=1) if k > 1 else 0.0,
+            "var_place_s": share.var(0, ddof=1) if k > 1 else 0.0,
         }, index=lv["areas"])
-        if "reps" in lv:    # replicate (survey) variance at block group and above
-            r_cases, r_rate = self._per_run(lv["reps"], p, inside)
+        reps = self._runs(level, "reps", logit, inside, delta) if self.n_reps else None
+        if reps is not None:    # replicate (survey) variance at block group and above
+            r_share = rate(*reps)
             factor = 4 / self.n_reps
-            out["var_survey"] = factor * ((r_cases - cases[self._main]) ** 2).sum(0)
-            out["var_survey_s"] = factor * ((r_rate - rate[self._main]) ** 2).sum(0)
+            out["var_survey"] = factor * ((reps[0] - cases[self._main]) ** 2).sum(0)
+            out["var_survey_s"] = factor * ((r_share - share[self._main]) ** 2).sum(0)
         else:
             out["var_survey"] = out["var_survey_s"] = 0.0
         return out
+
+    def _places_var(self, model: RiskModel, level: str, out: pd.DataFrame, logit, inside, delta) -> tuple[np.ndarray, np.ndarray]:
+        """PLACES variance of each area's cases and rate. Within a tract the error is shared
+        in proportion to cases; tracts are taken as independent."""
+        tr = self._level("tract", logit, inside, delta)
+        v_t = self._places_se(model) ** 2
+        uni_t = self._tract_cells[:, inside].sum(1)
+        if level == "city":
+            uni = uni_t.sum()
+            return np.array([v_t.sum()]), np.array([v_t.sum() / max(uni, 1e-9) ** 2])
+        t = self._levels[level]["tract"]
+        ok = t >= 0
+        ti = np.maximum(t, 0)
+        ratio = np.divide(out["estimate"].to_numpy(), tr["estimate"].to_numpy()[ti], out=np.zeros(len(out)),
+                          where=ok & (tr["estimate"].to_numpy()[ti] > 0))
+        v_share = np.divide(v_t, np.maximum(uni_t, 1e-9) ** 2)
+        return np.where(ok, ratio ** 2 * v_t[ti], 0.0), np.where(ok, v_share[ti], 0.0)
 
     def compute(self, model: RiskModel, level: str) -> pd.DataFrame:
         if not self.available:
@@ -257,12 +430,12 @@ class DataPointEngine:
         with self._lock:
             if key in self._cache:
                 return self._cache[key]
-        probs = model.probabilities(self.cells)
-        p, inside = probs["p"].to_numpy(), probs["in_universe"].to_numpy()
-        out = self._level(level, p, inside)
+        logit, inside = model.logits(self.cells)
+        delta = self.offsets(model)
+        out = self._level(level, logit, inside, delta)
         if level in ("parcel", "block"):
             # Below block group, attribute the block group's survey variance by share of its cases.
-            bg = self._level("block_group", p, inside)
+            bg = self._level("block_group", logit, inside, delta)
             parent = self._levels[level]["parent"]
             ok = parent >= 0
             take = lambda col: np.where(ok, bg[col].to_numpy()[np.where(ok, parent, 0)], 0.0)
@@ -270,6 +443,10 @@ class DataPointEngine:
             ratio = np.divide(out["estimate"].to_numpy(), bg_est, out=np.zeros(len(out)), where=bg_est > 0)
             out["var_survey"] = ratio ** 2 * take("var_survey")
             out["var_survey_s"] = take("var_survey_s")
+        if delta is not None:
+            v, v_s = self._places_var(model, level, out, logit, inside, delta)
+            out["var_survey"] = out["var_survey"] + v
+            out["var_survey_s"] = out["var_survey_s"] + v_s
         out["se"] = np.sqrt(out["var_place"] + out["var_survey"])
         out["share_se"] = np.sqrt(out["var_place_s"] + out["var_survey_s"])
         out["confidence"] = confidence(out["estimate"], out["se"])
@@ -280,12 +457,25 @@ class DataPointEngine:
             self._cache[key] = frame
         return frame
 
+    def offsets_by_tract(self, model: RiskModel) -> dict[str, float] | None:
+        """The tract shifts keyed by tract id, for the people layer."""
+        delta = self.offsets(model)
+        if delta is None:
+            return None
+        return {t: round(float(d), 4) for t, d in zip(self._levels["tract"]["areas"], delta)}
+
     def breakdown(self, model: RiskModel) -> dict[str, list[dict]]:
         """City-wide expected cases and rate by each factor's categories: how the
         distribution responds to the model, for the editor's charts."""
-        probs = model.probabilities(self.cells)
-        people = self._cell_people
-        cases_by_cell, uni_by_cell = people * probs["p"].to_numpy(), people * probs["in_universe"].to_numpy()
+        logit, inside = model.logits(self.cells)
+        delta = self.offsets(model)
+        if delta is None:
+            people = self._cell_people
+            cases_by_cell = people * np.where(inside, _expit(logit), 0.0)
+        else:
+            people = self._tract_cells.sum(0)
+            cases_by_cell = (self._tract_cells * _expit(logit[None, :] + delta[:, None])).sum(0) * inside
+        uni_by_cell = people * inside
         out = {}
         for f in self.factors:
             cats = self.catalog.variable(f).category_ids

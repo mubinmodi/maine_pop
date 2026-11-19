@@ -46,3 +46,13 @@ def test_second_load_reads_the_cache(sources):
     calls = sources.fetcher.calls
     sources.load("parcels")
     assert sources.fetcher.calls == calls
+
+
+def test_places_keeps_study_tracts_city_and_county(sources):
+    pl = sources.load("places")
+    tracts = pl[pl["level"] == "tract"]
+    assert tracts["area_id"].tolist() == [TRACT]            # the tract outside the study area is dropped
+    assert set(pl["measure"]) == {"DIABETES"}
+    assert tracts["estimate"].iloc[0] == 8.1 and tracts["adults"].iloc[0] == 4939
+    city = pl[pl["level"] == "city"]
+    assert sorted(city["value_type"]) == ["AgeAdjPrv", "CrdPrv"] and city["adults"].isna().all()

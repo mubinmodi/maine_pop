@@ -12,6 +12,9 @@ export type RiskModel = {
   odds_ratios: Record<string, Record<string, number>>;
   universe: Record<string, string[]>;
   description: string; source: string;
+  // "places:DIABETES": each tract's total matches CDC PLACES; `offsets` are the server's
+  // per-tract log-odds shifts that do that, so the people layer agrees with the area figures.
+  calibrate?: string; offsets?: Record<string, number>; offsets_error?: string;
 };
 export type Factor = { id: string; label: string; categories: Category[] };
 export type Level = { id: string; label: string; min_zoom: number; max_zoom: number };

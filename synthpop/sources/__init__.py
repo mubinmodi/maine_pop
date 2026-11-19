@@ -14,6 +14,7 @@ import io
 import json
 import zipfile
 from pathlib import Path
+from urllib.parse import urlencode
 
 import geopandas as gpd
 import pandas as pd
@@ -25,7 +26,7 @@ from .fetchers import FixtureFetcher, HttpFetcher
 __all__ = ["Sources", "HttpFetcher", "FixtureFetcher", "NAMES"]
 
 NAMES = ("place", "tracts", "block_groups", "blocks", "parcels", "e911",
-         "pums_households", "pums_persons", "acs")
+         "pums_households", "pums_persons", "acs", "places")
 
 CENSUS = "https://www2.census.gov"
 GEOLIB = "https://services1.arcgis.com/RbMX0mRVOFNTdLzd/ArcGIS/rest/services"
@@ -35,7 +36,13 @@ E911_FIELDS = ["SITE_UID", "ADDRESS", "UNIT", "PLACE_TYPE", "MAP_BK_LOT", "ZIPCO
 
 HOUSING_COLS = ["SERIALNO", "PUMA", "WGTP", "NP", "TYPEHUGQ", "BLD", "TEN", "YRBLT", "BDSP", "VALP", "HINCP"]
 PERSON_COLS = ["SERIALNO", "SPORDER", "PUMA", "PWGTP", "AGEP", "SEX", "RAC1P", "HISP", "SCHL", "RELSHIPP",
-               "POVPIP", "ESR"]
+               "POVPIP", "ESR", "DIS", "HICOV", "MIL"]
+
+# CDC PLACES: model-based estimates of adult health measures from BRFSS, by release.
+# The tract release is 2020 tracts, the same as TIGER 2024.
+CDC = "https://data.cdc.gov/resource"
+PLACES_DATASETS = {2025: {"tract": "cwsq-ngmh", "city": "eav7-hnsx", "county": "swc5-untb"}}
+PLACES_MEASURES = ("DIABETES",)          # PLACES measureid values to keep
 
 # ACS jam values: -555555555 means "controlled, no sampling error"; other negatives are missing.
 _CONTROLLED = -555555555
@@ -55,7 +62,7 @@ class Sources:
         if name not in NAMES:
             raise KeyError(f"unknown source {name!r}; expected one of {NAMES}")
         cache = self.interim / f"{name}.parquet"
-        is_geo = name not in ("pums_households", "pums_persons", "acs")
+        is_geo = name not in ("pums_households", "pums_persons", "acs", "places")
         if cache.exists():
             return gpd.read_parquet(cache) if is_geo else pd.read_parquet(cache)
         df = getattr(self, f"_load_{name}")()
@@ -229,6 +236,41 @@ class Sources:
         if missing:
             raise ValueError(f"ACS is missing {len(missing)} study-area block groups")
         return out
+
+    # ------------------------------------------------------------------ CDC PLACES
+
+    def _load_places(self) -> pd.DataFrame:
+        """Long table: level, area_id, measure, label, value_type, estimate, low, high (percent
+        of adults), adults, year, for every measure in PLACES_MEASURES, by study-area tract,
+        city and county. `year` is the BRFSS survey year behind the estimate; value_type is
+        CrdPrv (crude) or AgeAdjPrv (age-adjusted, city and county only)."""
+        a = self.area
+        datasets = PLACES_DATASETS.get(a.places_year) or _raise(f"add the PLACES {a.places_year} dataset ids")
+        where = {"tract": f"countyfips='{a.county_geoid}'", "city": f"locationid='{a.place_geoid}'",
+                 "county": f"locationid='{a.county_geoid}'"}
+        measures = ",".join(f"'{m}'" for m in PLACES_MEASURES)
+        frames = []
+        for level, dataset in datasets.items():
+            query = {"$select": "year,locationid,measureid,measure,datavaluetypeid,data_value,"
+                                "low_confidence_limit,high_confidence_limit,totalpop18plus",
+                     "$where": f"{where[level]} AND measureid in({measures})", "$limit": "50000"}
+            lines = self.fetcher.lines(f"places_{level}", f"{CDC}/{dataset}.csv?{urlencode(query)}")
+            df = pd.read_csv(io.StringIO("\n".join(lines)), dtype={"locationid": str})
+            df.insert(0, "level", level)
+            frames.append(df)
+        out = pd.concat(frames, ignore_index=True).rename(columns={
+            "locationid": "area_id", "measureid": "measure", "measure": "label", "datavaluetypeid": "value_type",
+            "data_value": "estimate", "low_confidence_limit": "low", "high_confidence_limit": "high",
+            "totalpop18plus": "adults"})
+        tracts = set(self.load("tracts")["area_id"])
+        out = out[(out["level"] != "tract") | out["area_id"].isin(tracts)].reset_index(drop=True)
+        missing = tracts - set(out.loc[out["level"] == "tract", "area_id"])
+        if missing:
+            raise ValueError(f"PLACES is missing {len(missing)} study-area tracts: {sorted(missing)[:5]}")
+        for c in ("estimate", "low", "high", "adults"):
+            out[c] = pd.to_numeric(out[c], errors="coerce")
+        out["adults"] = out["adults"].astype("Int64")
+        return out[["level", "area_id", "measure", "label", "value_type", "estimate", "low", "high", "adults", "year"]]
 
 
 def _acs_long(wide: pd.DataFrame, table: str) -> pd.DataFrame:

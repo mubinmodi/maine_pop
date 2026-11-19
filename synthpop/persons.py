@@ -22,9 +22,10 @@ from .model.place import assign_points, is_residential
 FIELDS = {"AGE": "AGEP", "SEX": "SEX", "POVERTY_RATIO": "POVPIP"}   # output column -> PUMS person column
 LABELS = {"SEX": {1: "male", 2: "female"}}                           # PUMS codes shown as words
 CATEGORIES = {"RACE": "race_eth", "EDUCATION": "education",          # output column -> run category column
-              "POVERTY": "poverty", "EMPLOYMENT": "employment"}
+              "POVERTY": "poverty", "EMPLOYMENT": "employment",
+              "DISABILITY": "disability", "HEALTH_INSURANCE": "health_insurance"}
 COLUMNS = ["person_id", "family_id", "parcel_id", "AGE", "SEX", "RACE", "EDUCATION",
-           "POVERTY", "POVERTY_RATIO", "EMPLOYMENT", "household_id"]
+           "POVERTY", "POVERTY_RATIO", "EMPLOYMENT", "DISABILITY", "HEALTH_INSURANCE", "household_id"]
 
 # PUMS RELSHIPP codes for the householder (20) and the householder's relatives by birth,
 # marriage or adoption: spouses (21, 23), children (25-27), siblings (28), parents (29),
@@ -40,6 +41,7 @@ def person_table(persons: pd.DataFrame, seed: pd.DataFrame, fields: dict[str, st
     - household_id: group-quarters residents, who live in no household
     - family_id: everyone outside a Census family (see family_ids)
     - EDUCATION: under 25; EMPLOYMENT: under 16
+    - DISABILITY, HEALTH_INSURANCE: people in institutions and active-duty military
     - POVERTY, POVERTY_RATIO: people whose poverty status is not determined (institutions,
       college dorms, military quarters, unrelated children under 15)
     """

@@ -1,10 +1,12 @@
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from synthpop import model
 from synthpop.model import Run
-from synthpop.model.fit import fit_weights, integerize
+from synthpop.model.fit import fit_tract, fit_weights, integerize
 from shapely.geometry import Point
 
 from synthpop.model.place import assign_points
@@ -23,6 +25,57 @@ def test_fit_hits_consistent_household_and_person_targets():
     fit = fit_weights(A, np.ones(3), np.array([10, 20, 70]), se=np.full(3, 1e-3), min_se=1e-3)
     assert fit.converged
     np.testing.assert_allclose(A @ fit.weights, [10, 20, 70], rtol=1e-3)
+
+
+def test_tract_fit_without_tract_cells_is_the_separate_block_group_fits():
+    A = np.array([[1, 0, 0], [0, 1, 1], [1, 2, 3]], dtype=float)
+    T = np.array([[10, 20, 70], [30, 5, 45]], dtype=float)
+    S = np.array([[2, 3, 6], [4, 1, 5]], dtype=float)
+    joint = fit_tract(A, np.ones(3), T, S)
+    for b in range(2):
+        np.testing.assert_allclose(joint[b].weights, fit_weights(A, np.ones(3), T[b], S[b]).weights, rtol=1e-6)
+
+
+def test_a_precise_tract_total_moves_the_noisier_block_group():
+    # One cell (people). Block groups say 100 ± 2 and 100 ± 20; the tract says 230 ± 1.
+    A = np.array([[1.0, 2.0]])
+    fits = fit_tract(A, np.ones(2), np.array([[100.0], [100.0]]), np.array([[2.0], [20.0]]),
+                     np.array([230.0]), np.array([1.0]))
+    a, b = (float(f.fitted[0]) for f in fits)
+    assert abs(a + b - 230) < 2                       # the sum lands on the tract total
+    assert b - 100 > 10 * (a - 100) > 0               # the imprecise block group takes most of the gap
+
+
+def test_a_tract_only_cell_is_fitted_on_the_block_groups_sum():
+    # Rows: people (both levels), people with a disability (tract only). Unit 1 has one.
+    A = np.array([[1.0, 1.0], [0.0, 1.0]])
+    fits = fit_tract(A, np.ones(2), np.array([[100.0], [100.0]]), np.array([[3.0], [3.0]]),
+                     np.array([200.0, 60.0]), np.array([2.0, 1.0]), bg_rows=np.array([True, False]))
+    assert abs(sum(f.weights[1] for f in fits) - 60) < 1.5    # tract-only total met
+    assert all(f.fitted.shape == (1,) for f in fits)          # block groups report their own rows only
+    assert all(abs(f.fitted[0] - 100) < 3 for f in fits)
+
+
+def test_whole_tracts_skips_tracts_with_block_groups_outside():
+    bg = pd.Series([50, 50, 40, 30], index=["230050001001", "230050001002", "230050002001", "230050002002"])
+    tract = pd.Series([100, 100], index=["23005000100", "23005000200"])
+    assert model.whole_tracts(bg, tract) == ["23005000100"]
+
+
+def test_runs_fit_whole_tracts_together(sources, catalog):
+    data = sources.load_all()
+    acs = data["acs"].copy()
+    # Make the fixture tract equal the sum of its two block groups, so it counts as whole.
+    bg = acs[acs["level"] == "block_group"].assign(tract=lambda d: d["area_id"].str[:11])
+    sums = bg.groupby(["tract", "cell"])["estimate"].sum()
+    tr = acs["level"] == "tract"
+    acs.loc[tr, "estimate"] = [sums.get((a, c), e) for a, c, e in acs.loc[tr, ["area_id", "cell", "estimate"]].itertuples(index=False)]
+    inputs = model.prepare({**data, "acs": acs}, catalog, AREA)
+    assert list(inputs.tract_targets.index) == ["23005000100"]
+    placed = model.run(inputs, Run.main())
+    assert placed.fits["tract_fit"].all() and placed.fits["converged"].all()
+    off = model.prepare({**data, "acs": acs}, catalog, replace(AREA, fit_tracts=False))
+    assert off.tract_targets.empty
 
 
 def test_integerize_keeps_the_rounded_total():
@@ -57,14 +110,16 @@ def test_person_table_copies_exact_age_and_sex_from_the_seed(inputs, sources):
     placed = model.run(inputs, Run.main())
     table = person_table(placed.persons, sources.load("pums_persons"))
     assert list(table.columns) == ["person_id", "family_id", "parcel_id", "AGE", "SEX", "RACE", "EDUCATION",
-                                   "POVERTY", "POVERTY_RATIO", "EMPLOYMENT", "household_id"]
+                                   "POVERTY", "POVERTY_RATIO", "EMPLOYMENT", "DISABILITY", "HEALTH_INSURANCE",
+                                   "household_id"]
     assert len(table) == len(placed.persons) and table["AGE"].notna().all()
     p = placed.persons.set_index("person_id").loc[table["person_id"]]
     assert (table["SEX"].to_numpy() == p["sex"].astype(str).to_numpy()).all()
     assert ((table["AGE"] >= 65).to_numpy() == (p["age65_plus"].astype(str) == "yes").to_numpy()).all()
     assert table.loc[p["household_id"].to_numpy() < 0, "household_id"].isna().all()
     # categories are the run's own; the exact ratio agrees with the poverty category
-    for col, var in (("RACE", "race_eth"), ("EDUCATION", "education"), ("POVERTY", "poverty"), ("EMPLOYMENT", "employment")):
+    for col, var in (("RACE", "race_eth"), ("EDUCATION", "education"), ("POVERTY", "poverty"), ("EMPLOYMENT", "employment"),
+                     ("DISABILITY", "disability"), ("HEALTH_INSURANCE", "health_insurance")):
         assert table[col].fillna("").tolist() == p[var].astype("string").fillna("").tolist()
     assert (table["AGE"].lt(25) == table["EDUCATION"].isna()).all()
     assert (table["AGE"].lt(16) == table["EMPLOYMENT"].isna()).all()

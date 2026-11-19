@@ -19,6 +19,8 @@ uv run synthpop persons --run draw_07   # any other placement draw
 | `POVERTY` | `below_100`, `p100_199` or `p200_plus` (income as % of the poverty line); empty where poverty status is not determined. The run's `poverty`, fitted to ACS C17002 |
 | `POVERTY_RATIO` | Exact income-to-poverty ratio in percent, from the seed person's `POVPIP` (501 = over 500%); empty with `POVERTY` |
 | `EMPLOYMENT` | `employed` (including the Armed Forces), `unemployed` or `not_in_lf` (not in the labor force); empty under 16. The run's `employment`, fitted to ACS B23025 |
+| `DISABILITY` | `with` or `without` a disability (hearing, vision, cognitive, walking, self-care or independent living); empty in institutions and for active-duty military. The run's `disability`, fitted to ACS C18108 by tract |
+| `HEALTH_INSURANCE` | `insured` or `uninsured`; same universe as `DISABILITY`. The run's `health_insurance`, fitted to ACS B27010 by block group and tract |
 | `household_id` | Synthetic household the person belongs to. Empty for the 1,959 group-quarters residents (dorms, nursing homes, shelters), who live in no household |
 | `lon`, `lat` | Point to plot the person at (WGS 84) |
 | `location` | `address` when the point is an E911 address point, `parcel` when it is a random point inside the parcel |
@@ -93,7 +95,7 @@ A circle's place on its parcel means nothing beyond the parcel: the model places
 
 ## Race, education, poverty and employment
 
-Every synthetic person is a whole copy of a seed person, so all four come with them. Each is also *calibrated*: a variable with a block-group constraint in `config/variables.yaml`, so the fit matches each block group's published ACS counts within their margins. The summary, API, map, filters, validation report and data-point risk factors pick them up from the YAML with no code change.
+Every synthetic person is a whole copy of a seed person, so all six come with them. Each is also *calibrated*: a variable with a constraint in `config/variables.yaml`, so the fit matches the published ACS counts within their margins, by block group, or by tract for disability. The summary, API, map, filters, validation report and data-point risk factors pick them up from the YAML with no code change.
 
 | Column | PUMS field | ACS block-group table | Universe |
 |---|---|---|---|
@@ -101,6 +103,8 @@ Every synthetic person is a whole copy of a seed person, so all four come with t
 | `EDUCATION` | `SCHL` | B15003 | 25 and over |
 | `POVERTY`, `POVERTY_RATIO` | `POVPIP` | C17002 | Poverty status determined: not people in institutions, college dorms or military quarters, nor unrelated children under 15 (`POVPIP` is empty for them, matching the table) |
 | `EMPLOYMENT` | `ESR` | B23025 | 16 and over |
+| `DISABILITY` | `DIS` | C18108, **tract only**: fitted on the sum of each tract's block groups (19 of 20 tracts) | Civilian noninstitutionalized: not in institutions (`TYPEHUGQ` 2) nor active-duty military (`MIL` 1) |
+| `HEALTH_INSURANCE` | `HICOV` | B27010 | Civilian noninstitutionalized, as `DISABILITY` |
 
 ### Why poverty and employment are calibrated
 

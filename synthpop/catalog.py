@@ -44,6 +44,7 @@ class Constraint:
     by: tuple[str, ...]
     cells: dict[str, tuple[str, ...]]            # "male|a0_4" -> ("B01001_003", "-B25008_001")
     exact: bool = False                          # fit as a hard total instead of within its SE
+    level: str = "block_group"                   # "tract": the table is only published for tracts
 
     @property
     def tables(self) -> set[str]:
@@ -75,7 +76,10 @@ class Catalog:
             constraints.append(Constraint(
                 id=c["id"], unit=c["unit"], by=tuple(c["by"]),
                 cells={k: tuple(v) for k, v in c["cells"].items()}, exact=bool(c.get("exact", False)),
+                level=str(c.get("level", "block_group")),
             ))
+            if constraints[-1].level not in ("block_group", "tract"):
+                raise ValueError(f"constraint {c['id']}: level must be block_group or tract")
         return cls(levels=raw["levels"], variables=variables, constraints=constraints,
                    model_tables=list(raw.get("model_tables", [])))
 

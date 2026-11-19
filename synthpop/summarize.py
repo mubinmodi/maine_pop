@@ -201,9 +201,14 @@ def published(acs: pd.DataFrame, catalog: Catalog) -> pd.DataFrame:
     frames = []
     done = set()
     for c in catalog.constraints:
+        refs = sorted({r.lstrip("-") for cells in c.cells.values() for r in cells})
+        if not set(refs) <= set(est.columns):
+            continue
+        # Areas where the constraint's tables are published (tract-only tables have no block groups).
+        has = est[refs].notna().any(axis=1)
         keys = pd.DataFrame([k.split("|") for k in c.cells], columns=list(c.by))
-        e = pd.DataFrame({i: _cell_sum(est, refs) for i, refs in enumerate(c.cells.values())})
-        v = pd.DataFrame({i: _cell_sum(var, refs, squared=True) for i, refs in enumerate(c.cells.values())})
+        e = pd.DataFrame({i: _cell_sum(est, refs) for i, refs in enumerate(c.cells.values())})[has]
+        v = pd.DataFrame({i: _cell_sum(var, refs, squared=True) for i, refs in enumerate(c.cells.values())})[has]
         for vid in list(c.by) + [d.id for d in catalog.active if d.kind == "derived"]:
             if vid in done:
                 continue
@@ -218,7 +223,7 @@ def published(acs: pd.DataFrame, catalog: Catalog) -> pd.DataFrame:
             done.add(vid)
             for cat in catalog.variable(vid).category_ids:
                 idx = list(keys.index[keys[vid].astype(str) == cat])
-                frames.append(_published_rows(est.index, vid, cat, e[idx].sum(axis=1), v[idx].sum(axis=1)))
+                frames.append(_published_rows(e.index, vid, cat, e[idx].sum(axis=1), v[idx].sum(axis=1)))
     for vid, cell in (("population", "B01001_001"), ("households", "B25002_002"), ("housing_units", "B25002_001")):
         if cell in est:
             frames.append(_published_rows(est.index, vid, "total", est[cell], var[cell]))

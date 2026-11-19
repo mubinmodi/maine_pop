@@ -23,11 +23,12 @@ Every input is public, needs no login and no API key. Each is clipped to the stu
 | Source | What we take | Portland result |
 |---|---|---|
 | [ACS PUMS 2020–2024 5-year](https://www2.census.gov/programs-surveys/acs/data/pums/2024/5-Year/), Maine | Household and person records for PUMA 23-01000 (Portland, South Portland, Westbrook), with all 80 replicate weights | 2,453 housing records (1,859 occupied households), 4,185 persons (442 in group quarters) |
-| [ACS 2020–2024 5-year table-based summary files](https://www2.census.gov/programs-surveys/acs/summary_file/2024/table-based-SF/data/5YRData/) | Tables B01001, B03002, B11016, B15003, B25002, B25008, B25032, streamed and filtered without storing the national files | 61 block groups, 20 tracts, plus city, county and state rows (11,760 values) |
+| [ACS 2020–2024 5-year table-based summary files](https://www2.census.gov/programs-surveys/acs/summary_file/2024/table-based-SF/data/5YRData/) | Tables B01001, B03002, B11016, B15003, B23025, B25002, B25008, B25032, B27010, C17002 and C18108 (tract only), streamed and filtered without storing the national files | 61 block groups, 20 tracts, plus city, county and state rows (11,760 values) |
 | [TIGER/Line 2024](https://www2.census.gov/geo/tiger/TIGER2024/) place, tracts, block groups | Boundaries. Areas count as Portland if at least half their area is inside the city. | 1 city, 20 tracts, 61 block groups |
 | [TIGER/Line 2020 tabulation blocks](https://www2.census.gov/geo/tiger/TIGER2020/TABBLOCK20/) | Block boundaries with 2020 Census population and housing-unit counts | 1,065 blocks, 68,336 people, 35,591 housing units |
 | [Maine GeoLibrary statewide parcels](https://services1.arcgis.com/RbMX0mRVOFNTdLzd/ArcGIS/rest/services/Parcels/FeatureServer/38) | Parcel boundaries and IDs (no assessor attributes) | 31,321 parcels |
 | [Maine E911 address points](https://services1.arcgis.com/RbMX0mRVOFNTdLzd/ArcGIS/rest/services/Maine_E911_Addresses_Feature/FeatureServer/0) | Address, unit, place type, parcel key | 40,708 points. 76.6% match a parcel ID by key; the rest are joined by location. |
+| [CDC PLACES 2025 release](https://data.cdc.gov/resource/cwsq-ngmh) (tract, city and county datasets) | Diagnosed diabetes among adults (BRFSS 2023, model-based): crude prevalence with 95% limits by tract; crude and age-adjusted for city and county. `PLACES_MEASURES` in `synthpop/sources/` lists the measures kept. | 20 tracts, 5.6%–11.5%; city 8.3% crude (8.1% age-adjusted), matching the adult-weighted tract mean |
 
 Checks on the fetched data: the 61 block groups sum to 68,761 people against 68,854 for the city (99.9%). The 2020 blocks sum to 68,336 against the city's 2020 count of 68,408.
 
@@ -37,7 +38,7 @@ The variables, constraint tables and category mappings all live in `config/varia
 
 For the main run, 20 more placement draws of it, 80 replicate runs (one per PUMS replicate weight set) and one validation run, in every block group:
 
-1. **Fit.** A penalized maximum-entropy fit (P-MEDM style, [ADR 0002](adr/0002-penalized-entropy-fit.md)) reweights the PUMA's seed households and group-quarters persons to that block group's ACS totals: sex × age, race/ethnicity, education (25+), household vs group quarters, household size, and tenure × units in structure.
+1. **Fit.** A penalized maximum-entropy fit (P-MEDM style, [ADR 0002](adr/0002-penalized-entropy-fit.md)) reweights the PUMA's seed households and group-quarters persons to that block group's ACS totals: sex × age, race/ethnicity, education (25+), household vs group quarters, household size, tenure × units in structure, and health insurance by under 65 / 65+. Disability by under 65 / 65+ (C18108) is published only for tracts and is fitted at tract level. The block groups of a tract are fitted together, with the tract's own totals on their sum (19 of 20 tracts; the other has a block group outside the city).
 2. **Integerize.** Turn weights into whole synthetic households.
 3. **Place.** Put each household on a housing unit on a parcel:
    - Unit counts come from E911 points per parcel, calibrated to 2020 block housing counts.

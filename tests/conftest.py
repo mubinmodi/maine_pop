@@ -30,7 +30,7 @@ CATALOG_PATH = ROOT / "config" / "variables.yaml"
 BG_IN = ["230050001001", "230050001002"]
 BG_OUT = "230050002001"
 TRACT = "23005000100"
-TABLE_WIDTH = {"B01001": 49, "B03002": 21, "B11016": 16, "B15003": 25, "B23025": 7, "C17002": 8, "B25002": 3, "B25008": 3, "B25032": 23}
+TABLE_WIDTH = {"B01001": 49, "B03002": 21, "B11016": 16, "B15003": 25, "B23025": 7, "C17002": 8, "B25002": 3, "B25008": 3, "B25032": 23, "C18108": 13, "B27010": 66}
 
 
 def _shapefile_zip(gdf: gpd.GeoDataFrame, path: Path) -> None:
@@ -103,6 +103,7 @@ def build_fixtures(root: Path) -> Path:
         "RAC1P": [1, 2, 1, 6, 6, 6, 1, 1], "HISP": [1, 1, 2, 1, 1, 1, 1, 1],
         "SCHL": [14, 21, 19, 16, 9, None, 12, 16], "RELSHIPP": [20, 20, 21, 20, 25, 25, 37, 20],
         "POVPIP": [250, 90, 90, 150, 150, 150, None, 300], "ESR": [6, 1, 3, 1, None, None, 6, 1],
+        "DIS": [1, 2, 2, 2, 1, 2, 1, 2], "HICOV": [1, 1, 2, 1, 1, 1, 1, 1], "MIL": [4, 4, 4, 2, None, None, 4, 4],
         **{f"PWGTP{r}": [50, 60, 60, 40, 40, 40, 30, 99] for r in range(1, 81)},
     })
     for name, df, member in (("pums_households", h, "psam_h23.csv"), ("pums_persons", p, "psam_p23.csv")):
@@ -120,6 +121,15 @@ def build_fixtures(root: Path) -> Path:
                 vals += [str(10 * i), "-555555555" if i == 1 else "5"]
             rows.append("|".join([g] + vals))
         (root / f"acs_{table.lower()}.dat").write_text("\n".join(rows) + "\n")
+
+    head = "year,locationid,measureid,measure,datavaluetypeid,data_value,low_confidence_limit,high_confidence_limit,totalpop18plus"
+    places = {"tract": [f"2023,{TRACT},DIABETES,Diagnosed diabetes among adults,CrdPrv,8.1,7.0,9.4,4939",
+                        "2023,23005000200,DIABETES,Diagnosed diabetes among adults,CrdPrv,6.7,5.8,7.7,2113"],
+              "city": ["2023,2399999,DIABETES,Diagnosed diabetes among adults,CrdPrv,8.3,7.3,9.3,",
+                       "2023,2399999,DIABETES,Diagnosed diabetes among adults,AgeAdjPrv,8.1,7.1,9.0,"],
+              "county": ["2023,23005,DIABETES,Diagnosed diabetes among adults,CrdPrv,8.9,7.9,10.0,"]}
+    for level, rows in places.items():
+        (root / f"places_{level}.csv").write_text("\n".join([head] + rows) + "\n")
     return root
 
 

@@ -97,3 +97,13 @@ def test_validation_report_writes(setup, catalog, tmp_path):
     text = (tmp_path / "validation.md").read_text()
     assert "Headline" in text and "Held-out blocks" in text
     assert (tmp_path / "csv" / "fit_by_area.csv").exists()
+
+
+def test_tract_only_tables_publish_no_block_group_rows(sources, catalog):
+    acs = sources.load("acs")
+    # The real C18108 is published for tracts, not block groups.
+    acs = acs[~((acs["level"] == "block_group") & acs["cell"].str.startswith("C18108"))]
+    pub = published(acs, catalog)
+    dis = pub[pub["variable"] == "disability"]
+    assert "block_group" not in set(dis["level"]) and {"tract", "city"} <= set(dis["level"])
+    assert "block_group" in set(pub.loc[pub["variable"] == "race_eth", "level"])

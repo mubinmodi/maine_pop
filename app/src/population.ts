@@ -76,6 +76,8 @@ export class Population {
 
   /** The data point being edited, recomputed on every slider move; null removes it. */
   setDraft(m: RiskModel | null) {
+    // Until the server sends new tract offsets for a changed calibrated draft, keep the last ones.
+    if (m?.calibrate && !m.offsets) m = { ...m, offsets: this.outcomes.get(DRAFT)?.model.offsets };
     if (m) this.apply(DRAFT, m); else this.outcomes.delete(DRAFT);
     this.changed();
   }
@@ -207,8 +209,8 @@ export class Population {
 
   // ---------------------------------------------------------------- tables
 
-  /** Columns of the person table and CSV. The first ten match `synthpop persons`: IDs, exact
-   * age, sex, race, education, poverty and employment; then household, block, the address
+  /** Columns of the person table and CSV. The first twelve match `synthpop persons`: IDs, exact
+   * age, sex, race, education, poverty, employment, disability and health insurance; then household, block, the address
    * point and one column per data point (1 case, 0 not, blank outside the universe). */
   columns(): [string, (i: number) => string | number][] {
     const p = this.doc, dims = this.dims();
@@ -224,6 +226,8 @@ export class Population {
       ["POVERTY", cat("poverty")],
       ["POVERTY_RATIO", (i) => (p.poverty_ratio[i] >= 0 ? p.poverty_ratio[i] : "")],
       ["EMPLOYMENT", cat("employment")],
+      ["DISABILITY", cat("disability")],
+      ["HEALTH_INSURANCE", cat("health_insurance")],
       ["household_id", (i) => (p.household[i] >= 0 ? p.household[i] : "")],
       ["block", (i) => p.blocks[p.block[i]]],
       ["lon", (i) => p.lon[i]],
@@ -263,10 +267,12 @@ function outcomes(p: People, schema: Schema, m: RiskModel): Uint8Array {
   const logOr = Object.entries(m.odds_ratios).map(([f, ors]) => [p.codes[f], cats(f).map((c) => Math.log(ors[c] ?? 1))] as const);
   const inside = Object.entries(m.universe).map(([f, allowed]) => [p.codes[f], cats(f).map((c) => allowed.includes(c))] as const);
   const base = Math.log(m.baseline / (1 - m.baseline));
+  // A calibrated model shifts each tract's log-odds (blocks start with their tract id).
+  const shift = m.calibrate && m.offsets ? p.blocks.map((b) => m.offsets![b.slice(0, 11)] ?? 0) : null;
   const out = new Uint8Array(p.count);
   for (let i = 0; i < p.count; i++) {
     if (!inside.every(([codes, ok]) => codes && codes[i] >= 0 && ok[codes[i]])) { out[i] = DATAPOINT.outside; continue; }
-    let l = base;
+    let l = shift ? base + shift[p.block[i]] : base;
     for (const [codes, lo] of logOr) if (codes && codes[i] >= 0) l += lo[codes[i]];
     out[i] = p.u[i] < 1 / (1 + Math.exp(-l)) ? DATAPOINT.case : DATAPOINT.notCase;
   }

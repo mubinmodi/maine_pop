@@ -118,6 +118,34 @@ variables:
       - {id: unemployed, label: "Unemployed"}
       - {id: not_in_lf, label: "Not in labor force"}
 
+  # DIS and HICOV, for the civilian noninstitutionalized population: everyone except
+  # people in institutions (nursing homes, prisons; TYPEHUGQ 2) and active-duty military
+  # (MIL 1), the universe of ACS tables C18108 and B27010. C18108 (disability) is published
+  # for tracts only, so the fit uses it at tract level; B27010 (insurance) has block groups.
+  - id: disability
+    label: Disability
+    kind: seed
+    unit: person
+    universe: "TYPEHUGQ != 2 and MIL != 1"
+    rules:
+      - {category: "with", when: "DIS == 1"}
+      - {category: "without", when: "DIS == 2"}
+    categories:
+      - {id: "with", label: "With a disability"}
+      - {id: "without", label: "No disability"}
+
+  - id: health_insurance
+    label: Health insurance
+    kind: seed
+    unit: person
+    universe: "TYPEHUGQ != 2 and MIL != 1"
+    rules:
+      - {category: insured, when: "HICOV == 1"}
+      - {category: uninsured, when: "HICOV == 2"}
+    categories:
+      - {id: insured, label: "Insured"}
+      - {id: uninsured, label: "No health insurance"}
+
   - id: living_quarters
     label: Living quarters
     kind: seed
@@ -399,6 +427,27 @@ constraints:
       "renter|units_5_19": [B25032_018, B25032_019]
       "renter|units_20_plus": [B25032_020, B25032_021]
       "renter|mobile_other": [B25032_022, B25032_023]
+
+  # Tract-only table (`level: tract`): fitted on the sum of a tract's block groups, for
+  # tracts wholly in the study area (model.fit.fit_tract).
+  - id: disability_age
+    unit: person
+    level: tract
+    by: [disability, age65_plus]
+    cells:
+      "with|no": [C18108_003, C18108_004, C18108_007, C18108_008]
+      "without|no": [C18108_005, C18108_009]
+      "with|yes": [C18108_011, C18108_012]
+      "without|yes": [C18108_013]
+
+  - id: insurance_age
+    unit: person
+    by: [health_insurance, age65_plus]
+    cells:
+      "uninsured|no": [B27010_017, B27010_033, B27010_050]
+      "insured|no": [B27010_002, "-B27010_017", B27010_018, "-B27010_033", B27010_034, "-B27010_050"]
+      "uninsured|yes": [B27010_066]
+      "insured|yes": [B27010_051, "-B27010_066"]
 
 # Extra ACS tables the model reads that are not variables.
 model_tables: [B25002]

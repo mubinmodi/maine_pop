@@ -1,3 +1,4 @@
+import csv
 import json
 
 import pandas as pd
@@ -7,10 +8,11 @@ from fastapi.testclient import TestClient
 from synthpop import model
 from synthpop.api import create_app
 from synthpop.atlas import Atlas, Filter
+from synthpop.datapoints import DataPointStore, RiskModel
 from synthpop.model import Run
 from synthpop.publish import publish, publish_people, publish_people_runs
 from synthpop.summarize import RunData, published, summarize
-from conftest import AREA, CATALOG_PATH
+from conftest import AREA, BG_IN, CATALOG_PATH
 
 
 @pytest.fixture
@@ -34,8 +36,13 @@ def out_dir(sources, catalog, tmp_path):
 
 
 @pytest.fixture
-def atlas(out_dir, catalog):
-    return Atlas.open(out_dir, catalog)
+def datapoints_path(tmp_path):
+    return tmp_path / "datapoints.yaml"
+
+
+@pytest.fixture
+def atlas(out_dir, catalog, datapoints_path):
+    return Atlas.open(out_dir, catalog, datapoints_path)
 
 
 def test_schema_lists_totals_and_catalog_variables(atlas):
@@ -68,17 +75,59 @@ def test_search_finds_addresses_and_areas(atlas):
     assert any(r["level"] == "county" for r in atlas.search("Cumberland"))
 
 
-def test_export_csv_and_geojson_label_values_synthetic(atlas):
-    body, media = atlas.export("block_group", "csv")
-    text = body.decode()
-    assert text.startswith("# All values") and "synthetic estimate" in text
+def test_csv_export_contains_the_selected_areas_population(atlas):
+    area_id = BG_IN[0]
+    population = atlas.layer("block_group", "population")["values"][area_id][0]
+
+    body, media = atlas.export("block_group", "csv", area_ids=[area_id])
+    disclosure, *lines = body.decode().splitlines()
+    rows = list(csv.DictReader(lines))
+
+    assert media == "text/csv"
+    assert disclosure.startswith("# All values")
+    assert [row["area_id"] for row in rows] == [area_id]
+    assert rows[0]["source"] == "synthetic estimate"
+    assert float(rows[0]["population.total"]) == pytest.approx(population, abs=0.0005)
+
+
+def test_geojson_export_uses_json_null_for_missing_area_values(atlas):
+    # One area has no synthetic estimate for a category that exists elsewhere.
+    atlas.db.execute(
+        "DELETE FROM stats WHERE source = 'synthetic' AND level = 'block_group' "
+        "AND area_id = ? AND variable = 'sex' AND category = 'female'", [BG_IN[0]],
+    )
+
+    def reject_non_json_number(value):
+        raise ValueError(f"invalid JSON number: {value}")
+
     geo, _ = atlas.export("block_group", "geojson")
-    feats = json.loads(geo)["features"]
-    assert len(feats) == 2 and feats[0]["properties"]["source"] == "synthetic estimate"
+    body = json.loads(geo, parse_constant=reject_non_json_number)
+    features = {f["properties"]["area_id"]: f for f in body["features"]}
+    assert body["type"] == "FeatureCollection"
+    assert set(features) == set(BG_IN)
+    assert features[BG_IN[0]]["geometry"]["type"] in {"Polygon", "MultiPolygon"}
+    assert features[BG_IN[0]]["properties"]["source"] == "synthetic estimate"
+    assert features[BG_IN[0]]["properties"]["sex.female"] is None
+    assert features[BG_IN[1]]["properties"]["sex.female"] > 0
 
 
-def test_api_routes(out_dir, tmp_path):
-    client = TestClient(create_app(out_dir, CATALOG_PATH, app_dir=tmp_path / "no-app"))
+def test_csv_still_exports_demographics_when_saved_model_cells_are_missing(out_dir, catalog, datapoints_path):
+    store = DataPointStore(datapoints_path, catalog)
+    model = RiskModel.parse({"id": "example_risk", "baseline": 0.1}, catalog)
+    store.save(model, set())
+    client = TestClient(create_app(out_dir, CATALOG_PATH, datapoints_path=datapoints_path))
+
+    response = client.get("/api/export", params={"level": "block_group", "format": "csv"})
+
+    assert response.status_code == 200, response.text
+    rows = list(csv.DictReader(response.text.splitlines()[1:]))
+    assert {row["area_id"] for row in rows} == set(BG_IN)
+    assert all(float(row["population.total"]) > 0 for row in rows)
+    assert all("example_risk.yes" not in row for row in rows)
+
+
+def test_api_routes(out_dir, tmp_path, datapoints_path):
+    client = TestClient(create_app(out_dir, CATALOG_PATH, app_dir=tmp_path / "no-app", datapoints_path=datapoints_path))
     assert client.get("/api/schema").status_code == 200
     assert client.get("/api/layer", params={"level": "block", "variable": "population"}).status_code == 200
     assert client.get("/api/layer", params={"level": "block", "variable": "nope"}).status_code == 404
@@ -119,8 +168,9 @@ def test_people_are_one_columnar_document_coded_by_schema_category(atlas, catalo
     assert all(r > 0 for r in units["r"])
 
 
-def test_password_protects_everything_but_the_health_check(out_dir, tmp_path):
-    client = TestClient(create_app(out_dir, CATALOG_PATH, app_dir=tmp_path / "no-app", password="s3cret"))
+def test_password_protects_everything_but_the_health_check(out_dir, tmp_path, datapoints_path):
+    client = TestClient(create_app(out_dir, CATALOG_PATH, app_dir=tmp_path / "no-app",
+                                   datapoints_path=datapoints_path, password="s3cret"))
     assert client.get("/healthz").status_code == 200
     r = client.get("/api/schema")
     assert r.status_code == 401 and r.headers["www-authenticate"].startswith("Basic")

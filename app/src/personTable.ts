@@ -5,7 +5,7 @@
 import type { PeopleView } from "./peopleView";
 
 const PAGE = 100;
-const KEY_COLS = 10;  // person_id … EMPLOYMENT, the columns of `synthpop persons`
+const KEY_COLS = 12;  // person_id … HEALTH_INSURANCE, the columns of `synthpop persons`
 
 export class PersonTable {
   private el: HTMLElement;
@@ -53,7 +53,7 @@ export class PersonTable {
         <button class="ghost tiny" data-act="close" aria-label="Close person table">×</button>
       </header>
       <div class="people-table pt-body"></div>
-      <p class="hint pt-note">Family = the householder and their relatives by birth, marriage or adoption (Census definition). POVERTY_RATIO = income as % of the poverty line (501 = over 500%). Blank = outside the column's universe: no family; EDUCATION under 25; EMPLOYMENT under 16; POVERTY not determined (institutions, dorms, unrelated children under 15). Click a row to go to that person.</p>`;
+      <p class="hint pt-note">Family = the householder and their relatives by birth, marriage or adoption (Census definition). POVERTY_RATIO = income as % of the poverty line (501 = over 500%). Blank = outside the column's universe: no family; EDUCATION under 25; EMPLOYMENT under 16; POVERTY not determined (institutions, dorms, unrelated children under 15); DISABILITY and HEALTH_INSURANCE in institutions and active-duty military. Click a row to go to that person.</p>`;
     const q = this.el.querySelector<HTMLInputElement>(".pt-find")!;
     q.oninput = () => { this.query = q.value; this.page = 0; this.update(); };
     this.el.querySelector<HTMLButtonElement>('[data-act="prev"]')!.onclick = () => { this.page--; this.render(); };

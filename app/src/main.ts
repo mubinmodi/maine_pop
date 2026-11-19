@@ -187,7 +187,12 @@ async function start() {
       cityRate = p.city.share;
     } else cityRate = null;
     if (my !== seq) return;                       // a newer refresh started meanwhile
-    if (editing) editing.editor.showResult(color as Awaited<ReturnType<typeof previewDatapoint>>);
+    if (editing) {
+      const p = color as Awaited<ReturnType<typeof previewDatapoint>>;
+      editing.editor.showResult(p);
+      // A calibrated draft's tract offsets come from the server: give them to the people layer.
+      if (p.model.offsets) { editing.model = { ...editing.model, offsets: p.model.offsets }; view?.pop.setDraft(editing.model); }
+    }
     current = { level, color };
     const scheme = vsCity ? "vs_city" : state.scheme === "vs_city" ? "green_blue" : state.scheme;
     const reference = city ? Object.values(city.values)[0]?.[0] ?? 0 : cityRate;

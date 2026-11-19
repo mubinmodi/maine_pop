@@ -12,9 +12,11 @@ vintages:
   pums: 2024                # PUMS 2020-2024 5-year
   tiger: 2024               # tracts, block groups, place (2020 geography)
   blocks: 2020              # 2020 Census blocks with POP20 / HOUSING20
+  places: 2025              # CDC PLACES release (BRFSS 2023): adult health measures by tract
 
 model:
   replicates: 80            # PUMS replicate weight sets
   holdout_fraction: 0.2     # blocks hidden in the validation run
   placement_draws: 20       # extra placements of the main run, for parcel expected values
+  fit_tracts: true          # fit each tract's block groups together, with the tract's ACS totals too
   random_seed: 20261022

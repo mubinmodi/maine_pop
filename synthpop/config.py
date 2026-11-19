@@ -23,10 +23,12 @@ class StudyArea:
     pums_year: int
     tiger_year: int
     blocks_year: int
+    places_year: int
     replicates: int
     holdout_fraction: float
     placement_draws: int
     random_seed: int
+    fit_tracts: bool = True
 
     @property
     def county_geoid(self) -> str:
@@ -44,6 +46,6 @@ class StudyArea:
             name=raw["name"], state_fips=str(raw["state_fips"]), county_fips=str(raw["county_fips"]),
             place_fips=str(raw["place_fips"]), place_name=raw["place_name"], puma=str(raw["puma"]),
             e911_town=raw["e911_town"], acs_year=v["acs"], pums_year=v["pums"], tiger_year=v["tiger"],
-            blocks_year=v["blocks"], replicates=m["replicates"], holdout_fraction=m["holdout_fraction"], placement_draws=m.get("placement_draws", 20),
-            random_seed=m["random_seed"],
+            blocks_year=v["blocks"], places_year=v.get("places", 2025), replicates=m["replicates"], holdout_fraction=m["holdout_fraction"], placement_draws=m.get("placement_draws", 20),
+            random_seed=m["random_seed"], fit_tracts=bool(m.get("fit_tracts", True)),
         )
